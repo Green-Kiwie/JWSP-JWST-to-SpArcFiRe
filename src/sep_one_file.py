@@ -46,7 +46,7 @@ def _create_directory(name: str) -> None:
         shutil.rmtree(name)
         
     try:
-        os.mkdir(name)
+        os.makedirs(name)
         print(f"Directory '{name}' created successfully.")
     except FileExistsError:
         print(f"Directory '{name}' already exists.")
