@@ -215,21 +215,14 @@ def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_
       
         if type(cropped_data) != type(None):
 
-            file_name = f"object_{i + 1}.fits"
-            file_address = os.path.join(output_dir, file_name)
+            curr_file_name = file_name + f"object_{i + 1}.fits"
+            file_address = os.path.join(output_dir, curr_file_name)
 
             image_meta_data = _update_meta_data(obj, image_meta_data, padding)
 
             _save_to_fits(file_address, cropped_data, image_meta_data)
 
-            print(f"Saved: {file_name}")
+            print(f"Saved: {curr_file_name}")
             total_files += 1
 
     print(f"total files cropped: {total_files}")
-
-    
-
-#ideas: use astropy way to replace nan values. currently replacing nan with 0. can be bad
-#code added but need to test
-
-#nice: 104

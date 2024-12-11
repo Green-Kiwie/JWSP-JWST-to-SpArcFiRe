@@ -71,12 +71,12 @@ def _get_required_verbosity() -> int:
 
     return verbosity
     
-def _get_thumbprints(file_name: str, image_data: np.ndarray, image_meta_data: dict, celestial_objects: np.ndarray) -> None:
+def _get_thumbprints(output_filepath: str, image_data: np.ndarray, image_meta_data: dict, celestial_objects: np.ndarray) -> None:
     '''splits image image into files'''
     verbosity = _get_required_verbosity()
-    directory = file_name[:-5]
+    directory = output_filepath
     _create_directory(directory)
-    sh.extract_objects_to_file(image_data, image_meta_data, file_name, celestial_objects, directory, min_size = _MIN_SIZE, verbosity = verbosity)
+    sh.extract_objects_to_file(image_data, image_meta_data, '', celestial_objects, directory, min_size = _MIN_SIZE, verbosity = verbosity)
     
     
 if __name__ == "__main__":
@@ -97,7 +97,7 @@ if __name__ == "__main__":
     _print_image([scaled_image, celestial_objects], sh.plot_object_mask_on_galaxy, 'mask')
 
     pure_name = pathlib.Path(file_name).name
-    output_filepath = 'output/' + pure_name
+    output_filepath = 'output/' + pure_name[:-5]
     _get_thumbprints(output_filepath, scaled_image, image_meta_data, celestial_objects,)
 
 

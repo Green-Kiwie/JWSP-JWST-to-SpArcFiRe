@@ -13,3 +13,7 @@ Scripts available:
 2. view_thumbnail:
     script displays the image using matplotlib and prints all cards of the image on the commandline. 
     mainly used to view thumbnails that have been extracted. 
+
+
+known errors:
+1. for extracted thumbnails, the RA and DEC information is the position of the original image and not accurate to the galaxy in the thumbnail 
