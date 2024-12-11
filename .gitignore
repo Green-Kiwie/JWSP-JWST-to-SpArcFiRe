@@ -1,2 +1,3 @@
-src/main_data
-src/test_data
+src/main_data/*
+src/test_data/*
+src/output/*

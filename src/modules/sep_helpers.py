@@ -204,12 +204,11 @@ def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict, padding: fl
     return new_meta_data
 
 
-def extract_objects_to_file(image_data: np.ndarray, file_name: str, celestial_objects: np.ndarray, 
+def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_name: str, celestial_objects: np.ndarray, 
                             output_dir: str, padding: float = 1.5, min_size: int = 0,
                             verbosity: int = 0) -> None:
     '''extracts celestials objects from image_data to fits fil in directory'''
-    image_meta_data = get_relevant_fits_meta_data(file_name)
-
+    
     total_files = 0
     for i, obj in enumerate(celestial_objects):
         cropped_data = _extract_object(obj, image_data, padding, min_size, verbosity)
