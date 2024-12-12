@@ -13,17 +13,21 @@ def _check_file_exists(filename: str) -> bool:
     '''validates if filename exist'''
     return pathlib.Path(filename).exists()
 
+def _check_file_is_dir(filename: str) -> bool:
+    '''validates if filename is a dir'''
+    return pathlib.Path(filename).is_dir() 
+
 def _get_file_name() -> str:
-    '''ask and validates file name from user'''
+    '''ask and validates file name from user, takes both directory and invidual file'''
     while True:
-        file_name = input("filename: ")
+        file_name = input("filename or directory: ")
         if file_name.endswith('.fits') and len(file_name) > 5:
             if _check_file_exists(file_name):
-                break
+                return file_name, 'fits'
+        elif _check_file_is_dir(file_name):
+            return file_name, 'dir'
 
         print("Invalid file, name. Please give another file name.")
-
-    return file_name
 
 def _get_val_len(value: bool|str|int|float) -> int:
     '''returns the length of the value when printed'''
@@ -68,15 +72,25 @@ def _print_thumbnail_info(meta_data: 'astropy.header', meta_data_comments: 'astr
     for key in meta_data.keys():
         _print_info(key, meta_data[key], meta_data_comments[key], max_name_len, max_value_len)
 
-if __name__ == '__main__':
-    file_name = _get_file_name()
-
-    meta_data, meta_data_comments = sh.get_all_fits_meta_data(file_name)
+def _print_one_file(filename: str) -> None:
+    '''prints one file'''
+    meta_data, meta_data_comments = sh.get_all_fits_meta_data(filename)
     print("Thumbnail information: ")
     _print_thumbnail_info(meta_data, meta_data_comments)
+    image_data = sh.get_main_fits_data(filename)
+    sh.show_fits_image(image_data, f"Thumbnail of {filename}")
 
-    image_data = sh.get_main_fits_data(file_name)
-    sh.show_fits_image(image_data, f"Thumbnail of {file_name}")
+if __name__ == '__main__':
+    file_name, file_type = _get_file_name()
+
+    if file_type == 'dir':
+        directory = pathlib.Path(file_name)
+        for fits_file in directory.iterdir():
+            if str(fits_file).endswith('fits'):
+                _print_one_file(fits_file)
+
+    elif file_type == 'fits':
+        _print_one_file(file_name)
 
 
     

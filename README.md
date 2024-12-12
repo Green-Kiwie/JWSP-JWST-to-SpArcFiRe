@@ -11,8 +11,9 @@ Scripts available:
     cards contain information such as size of galaxy and distance of galaxy
 
 2. view_thumbnail:
-    script displays the image using matplotlib and prints all cards of the image on the commandline. 
+    script displays a fits image using matplotlib and prints all cards of the image on the commandline. 
     mainly used to view thumbnails that have been extracted.
+    takes can display a single fits image or can display all the fits images in a directory
 
 3. sep_from_mast:
     script will request for a filepath/filename of a csv file with mast_uri as one of the columns.
