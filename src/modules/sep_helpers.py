@@ -5,7 +5,8 @@ import os
 import math
 
 from astropy.io import fits
-from astropy.convolution import convolve, Gaussian2DKernel, interpolate_replace_nans
+from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
+from astropy.wcs import WCS
 from matplotlib.patches import Ellipse
 
 def _fill_nan(image_data: np.ndarray) -> np.ndarray:
@@ -59,15 +60,17 @@ def get_relevant_fits_meta_data(filepath: str) -> dict:
         primary_data = hdul[0].header
 
     # print("primary header: ", primary_data)
-    meta_data_list = [('DATE-BEG', 'Begin datetime of the exposure'),
-     ('DATE-END', 'END datetime of the exposure'),
-     ('OBS_ID', 'Observation ID'),
-     ('TARG_RA', 'RA Position of Target'),
-     ('TARG_DEC', 'DEC Position of Target'),
-     ('EFFEXPTM', 'Effective exposure time of image in second')
+    meta_data_list = [('DATE-BEG', 'DATE-BEG', 'Begin datetime of the exposure'),
+     ('DATE-END', 'DATE-END', 'END datetime of the exposure'),
+     ('OBS_ID', 'OBS_ID', 'Observation ID'),
+     ('TARG_RA', 'TARG_RA', 'RA Position of Target'),
+     ('TARG_DEC', 'TARG_DEC', 'DEC Position of Target'),
+     ('EFFEXPTM', 'EFFEXPTM','Effective exposure time of image in second'),
+     ('ORIAXIS1', 'SUBSIZE1', 'number of pixels in original image axis 1'),
+     ('ORIAXIS2', 'SUBSIZE2', 'number of pixels in original image axis 2')
     ]
-    for key, description in meta_data_list:
-        relevant_meta_data[key] = (primary_data[key], description)
+    for new_key, key, description in meta_data_list:
+        relevant_meta_data[new_key] = (primary_data[key], description)
     
     try:
         image_data_header = hdul['SCI'].header
@@ -185,18 +188,48 @@ def _gal_dist_estimate(gal_diameter: float) -> float:
     return distance
 
 
-def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict, padding: float) -> dict:
+def _resolve_position(pixel_size: float, ori_xpos: int, ori_ypos: int, 
+                      obj_xpos: int, obj_ypos: int, 
+                      ori_ra: float, ori_dec: float) -> tuple[float, float]:
+    '''resolves the RA and DEC of a object from the original image'''
+    pixel_scale = np.sqrt(pixel_size)
+    pixel_scale_deg = pixel_scale / 3600.0  
+
+    # Create WCS object
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [ori_xpos, ori_ypos]  # Reference pixel
+    wcs.wcs.cdelt = [-pixel_scale_deg, pixel_scale_deg]  # Pixel scale in degrees
+    wcs.wcs.crval = [ori_ra, ori_dec]  # Reference RA and DEC
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]  # Projection type
+
+    # Compute RA, DEC of the given pixel position
+    sky_coord = wcs.pixel_to_world(obj_xpos, obj_ypos)  # Use xpos and ypos as separate arguments
+
+    # Return RA and DEC in degrees
+    return sky_coord.ra.deg, sky_coord.dec.deg
+
+def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict) -> dict:
     '''updates meta data for particular image'''
     new_meta_data = current_meta_data.copy()
-    # image_size_x, image_size_y = new_meta_data['NAXIS1'], new_meta_data['NAXIS2']
-    pixel_width = math.sqrt(new_meta_data['PIXAR_A2'][0])
+    pixel_size = new_meta_data['PIXAR_A2'][0]
+    pixel_width = math.sqrt(pixel_size)
 
-    gal_width = obj_data['a']* pixel_width #image_size_x/padding * pixel_width
-    gal_height = obj_data['b']* pixel_width #image_size_y/padding * pixel_width
+    gal_width = obj_data['a']* pixel_width
+    gal_height = obj_data['b']* pixel_width 
     gal_diameter = math.sqrt(gal_width*gal_width + gal_height*gal_height)
     new_meta_data['GALX'] = (gal_width, 'width of galaxy in arcseconds')
     new_meta_data['GALY'] = (gal_height, 'height of galaxy in arcseconds')
     new_meta_data['GALDIAM'] = (gal_diameter, 'diameter of galaxy in arcseconds')
+    
+    ori_pos_x, ori_pos_y = current_meta_data['ORIAXIS1'][0]/2, current_meta_data['ORIAXIS2'][0]/2
+    x_pos_in_image, y_pos_in_image = int(obj_data['x']), int(obj_data['y'])
+    ori_ra = current_meta_data['TARG_RA'][0]
+    ori_dec = current_meta_data['TARG_DEC'][0]
+    obj_ra, obj_dec = _resolve_position(pixel_size, ori_pos_x, ori_pos_y, 
+                                x_pos_in_image, y_pos_in_image, 
+                                ori_ra, ori_dec)
+    new_meta_data['OBJ_RA'] = (obj_ra, 'RA of galaxy')
+    new_meta_data['OBJ_DEC'] = (obj_dec, 'DEC of galaxy')
     
     gal_distance = _gal_dist_estimate(gal_diameter)
     new_meta_data['GALDIST'] = (gal_distance, 'distance to galaxy in light years')
@@ -218,7 +251,7 @@ def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_
             curr_file_name = file_name + f"object_{i + 1}.fits"
             file_address = os.path.join(output_dir, curr_file_name)
 
-            image_meta_data = _update_meta_data(obj, image_meta_data, padding)
+            image_meta_data = _update_meta_data(obj, image_meta_data)
 
             _save_to_fits(file_address, cropped_data, image_meta_data)
 
