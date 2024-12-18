@@ -65,18 +65,22 @@ def _print_info(key: str, meta_data: str, comment: str, max_name_len: int, max_v
     print(': ', end = '')
     print(comment)
 
-def _print_thumbnail_info(meta_data: 'astropy.header', meta_data_comments: 'astropy.header.comments') -> None:
+def _print_thumbnail_info(meta_data: dict[tuple[any, any]]) -> None:
     '''prints thumbnail in nice format'''
     max_name_len = _get_max_len(meta_data.keys())
-    max_value_len =  _get_max_len(meta_data.values())
+
+    meta_data_val = []
     for key in meta_data.keys():
-        _print_info(key, meta_data[key], meta_data_comments[key], max_name_len, max_value_len)
+        meta_data_val.append(meta_data[key][0])
+    max_value_len =  _get_max_len(meta_data_val)
+    for key in meta_data.keys():
+        _print_info(key, meta_data[key][0], meta_data[key][1], max_name_len, max_value_len)
 
 def _print_one_file(filename: str) -> None:
     '''prints one file'''
-    meta_data, meta_data_comments = sh.get_all_fits_meta_data(filename)
+    meta_data = sh.get_all_fits_meta_data(filename)
     print("Thumbnail information: ")
-    _print_thumbnail_info(meta_data, meta_data_comments)
+    _print_thumbnail_info(meta_data)
     image_data = sh.get_main_fits_data(filename)
     sh.show_fits_image(image_data, f"Thumbnail of {filename}")
 

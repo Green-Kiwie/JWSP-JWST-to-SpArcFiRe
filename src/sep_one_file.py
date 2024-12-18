@@ -12,6 +12,7 @@ import os
 import shutil
 
 _MIN_SIZE = 15 #minimum size of object before object is cropped
+_MAX_SIZE = 100
 
 def _get_file_name() -> str:
     '''ask and validates file name from user'''
@@ -76,7 +77,7 @@ def _get_thumbprints(output_filepath: str, image_data: np.ndarray, image_meta_da
     verbosity = _get_required_verbosity()
     directory = output_filepath
     _create_directory(directory)
-    sh.extract_objects_to_file(image_data, image_meta_data, '', celestial_objects, directory, min_size = _MIN_SIZE, verbosity = verbosity)
+    sh.extract_objects_to_file(image_data, image_meta_data, '', celestial_objects, directory, min_size = _MIN_SIZE, max_size = _MAX_SIZE, verbosity = verbosity)
     
     
 if __name__ == "__main__":

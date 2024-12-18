@@ -14,6 +14,7 @@ import shutil
 import os
 
 _MIN_SIZE = 15 #minimum size of object before object is cropped
+_MAX_SIZE = 100
 
 def _check_file_exists(filename: str) -> bool:
     '''validates if filename exist'''
@@ -78,11 +79,11 @@ def _create_directory(name: str) -> None:
         
     try:
         os.makedirs(name)
-        print(f"Directory '{name}' created successfully.")
+        print(f"Output Directory '{name}' created successfully.")
     except FileExistsError:
-        print(f"Directory '{name}' already exists.")
+        print(f"Output Directory '{name}' already exists.")
     except PermissionError:
-        print(f"Permission denied: Unable to create '{name}'.")
+        print(f"output directory Permission denied: Unable to create '{name}'.")
     except Exception as e:
         print(f"An error occurred: {e}")
 
@@ -93,7 +94,7 @@ def _get_thumbprints(output_dir: str, original_image_name: str, image_data: np.n
     _create_directory(output_dir)
     file_prename = original_image_name[:-5] + '_'
     sh.extract_objects_to_file(image_data, image_meta_data, file_prename, celestial_objects, 
-                               output_dir, min_size = _MIN_SIZE, verbosity = verbosity)
+                               output_dir, min_size = _MIN_SIZE, max_size = _MAX_SIZE, verbosity = verbosity)
     
 
 def _run_sep(filepath: str) -> bool:

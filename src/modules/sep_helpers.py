@@ -6,13 +6,16 @@ import math
 
 from astropy.io import fits
 from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
-from astropy.wcs import WCS
 from matplotlib.patches import Ellipse
+
+import file_handling_class as fhc
+import position_resolving as resolve
 
 def _fill_nan(image_data: np.ndarray) -> np.ndarray:
     '''uses the astropy function convolute to fill in nan values'''
     gauss_kernal = Gaussian2DKernel(1)
     convolved_data = interpolate_replace_nans(image_data, gauss_kernal)
+    
     return convolved_data
 
 def get_main_fits_data(filepath: str) -> np.ndarray:
@@ -29,9 +32,9 @@ def get_main_fits_data(filepath: str) -> np.ndarray:
     hdul.close()
     return byte_swapped_data
 
-def get_all_fits_meta_data(filepath: str) -> tuple['astropy.header', 'astropy.header.comments']:
+def get_all_fits_meta_data(filepath: str) -> dict[tuple[any, any]]:
     '''gets all meta data of file, 
-    both astropy.header and astropy.header.comments can be accessed like dictionaries'''
+    comments and values themselves combined into a dictionary'''
     hdul = fits.open(filepath)
 
     try:
@@ -42,7 +45,12 @@ def get_all_fits_meta_data(filepath: str) -> tuple['astropy.header', 'astropy.he
         primary_data_comments = hdul[0].header.comments
 
     hdul.close()
-    return primary_data, primary_data_comments
+
+    output = dict()
+    for key in primary_data.keys():
+        output[key] = (primary_data[key], primary_data_comments[key])
+
+    return output
 
 def get_relevant_fits_meta_data(filepath: str) -> dict:
     '''
@@ -63,8 +71,8 @@ def get_relevant_fits_meta_data(filepath: str) -> dict:
     meta_data_list = [('DATE-BEG', 'DATE-BEG', 'Begin datetime of the exposure'),
      ('DATE-END', 'DATE-END', 'END datetime of the exposure'),
      ('OBS_ID', 'OBS_ID', 'Observation ID'),
-     ('TARG_RA', 'TARG_RA', 'RA Position of Target'),
-     ('TARG_DEC', 'TARG_DEC', 'DEC Position of Target'),
+     ('ORI_RA', 'TARG_RA', 'RA Position of original image'),
+     ('ORI_DEC', 'TARG_DEC', 'DEC Position of original image'),
      ('EFFEXPTM', 'EFFEXPTM','Effective exposure time of image in second'),
      ('ORIAXIS1', 'SUBSIZE1', 'number of pixels in original image axis 1'),
      ('ORIAXIS2', 'SUBSIZE2', 'number of pixels in original image axis 2')
@@ -154,27 +162,32 @@ def _save_to_fits(filepath: str, image_data: np.ndarray, image_meta_data: dict) 
         hdu.header[key] = image_meta_data[key]
     
     hdu.writeto(filepath, overwrite=True)
+    print(f"Saved: {filepath}")
+    
 
-def _extract_object(obj: np.void, image_data: np.ndarray, padding: float, min_size: int, verbosity: int) -> np.ndarray|None:
-    '''crop out the object from the main data and returns the cropped image. returns none if crop too small'''
+def _extract_object(obj: np.void, image_data: np.ndarray, padding: float, min_size: int, max_size: int, verbosity: int) -> np.ndarray|None:
+    '''crop out the object from the main data and returns the cropped image. returns none if crop too small or too large'''
     x_center, y_center = int(obj['x']), int(obj['y'])
    
-    try: # Determine the bounding box size based on the object's dimensions
+    try: 
         max_half_size = int(padding * max(obj['a'], obj['b']))
     except:
         if verbosity == 1:
             print(f"object bounding box contains nan value")
         return None
 
-    # Define crop boundaries
     x_min, x_max, y_min, y_max = _get_thumbnail_coord(max_half_size, x_center, y_center, image_data)
 
     if abs(x_max-x_min) < min_size or abs(y_max-y_min) < min_size:
         if verbosity == 1:
             print(f"object size is {abs(x_max-x_min)} and {abs(y_max-y_min)}. Ignored as too small")
         return None
+    
+    if abs(x_max-x_min) > max_size or abs(y_max-y_min) > max_size:
+        if verbosity == 1:
+            print(f"object size is {abs(x_max-x_min)} and {abs(y_max-y_min)}. Ignored as too large")
+        return None
 
-    # Crop the image
     cropped_data = image_data[y_min:y_max, x_min:x_max]
 
     return cropped_data
@@ -188,34 +201,28 @@ def _gal_dist_estimate(gal_diameter: float) -> float:
     return distance
 
 
-def _resolve_position(pixel_size: float, ori_xpos: int, ori_ypos: int, 
-                      obj_xpos: int, obj_ypos: int, 
-                      ori_ra: float, ori_dec: float) -> tuple[float, float]:
-    '''resolves the RA and DEC of a object from the original image'''
-    pixel_scale = np.sqrt(pixel_size)
-    pixel_scale_deg = pixel_scale / 3600.0  
 
-    # Create WCS object
-    wcs = WCS(naxis=2)
-    wcs.wcs.crpix = [ori_xpos, ori_ypos]  # Reference pixel
-    wcs.wcs.cdelt = [-pixel_scale_deg, pixel_scale_deg]  # Pixel scale in degrees
-    wcs.wcs.crval = [ori_ra, ori_dec]  # Reference RA and DEC
-    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]  # Projection type
 
-    # Compute RA, DEC of the given pixel position
-    sky_coord = wcs.pixel_to_world(obj_xpos, obj_ypos)  # Use xpos and ypos as separate arguments
-
-    # Return RA and DEC in degrees
-    return sky_coord.ra.deg, sky_coord.dec.deg
-
-def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict) -> dict:
+def _update_meta_data(obj_data: np.ndarray, image_data: np.ndarray, current_meta_data: dict) -> dict:
     '''updates meta data for particular image'''
     new_meta_data = current_meta_data.copy()
     pixel_size = new_meta_data['PIXAR_A2'][0]
     pixel_width = math.sqrt(pixel_size)
 
+    
     gal_width = obj_data['a']* pixel_width
     gal_height = obj_data['b']* pixel_width 
+
+    gal_pix_width = image_data.shape[1]
+    gal_pix_height = image_data.shape[0]
+    new_meta_data['NAXIS1'] = (gal_pix_width, 'width of thumbnail')
+    new_meta_data['NAXIS2'] = (gal_pix_height, 'height of thumbnail')
+
+    x_center, y_center = int(obj_data['x']), int(obj_data['y'])
+    new_meta_data['ORI_POSX'] = (x_center, 'original pixel x position of thumbnail')
+    new_meta_data['ORI_POSY'] = (y_center, 'original pixel y position of thumbnail')
+
+
     gal_diameter = math.sqrt(gal_width*gal_width + gal_height*gal_height)
     new_meta_data['GALX'] = (gal_width, 'width of galaxy in arcseconds')
     new_meta_data['GALY'] = (gal_height, 'height of galaxy in arcseconds')
@@ -223,9 +230,9 @@ def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict) -> dict:
     
     ori_pos_x, ori_pos_y = current_meta_data['ORIAXIS1'][0]/2, current_meta_data['ORIAXIS2'][0]/2
     x_pos_in_image, y_pos_in_image = int(obj_data['x']), int(obj_data['y'])
-    ori_ra = current_meta_data['TARG_RA'][0]
-    ori_dec = current_meta_data['TARG_DEC'][0]
-    obj_ra, obj_dec = _resolve_position(pixel_size, ori_pos_x, ori_pos_y, 
+    ori_ra = current_meta_data['ORI_RA'][0]
+    ori_dec = current_meta_data['ORI_DEC'][0]
+    obj_ra, obj_dec = resolve.resolve_position(pixel_size, ori_pos_x, ori_pos_y, 
                                 x_pos_in_image, y_pos_in_image, 
                                 ori_ra, ori_dec)
     new_meta_data['OBJ_RA'] = (obj_ra, 'RA of galaxy')
@@ -238,24 +245,24 @@ def _update_meta_data(obj_data: np.ndarray, current_meta_data: dict) -> dict:
 
 
 def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_name: str, celestial_objects: np.ndarray, 
-                            output_dir: str, padding: float = 1.5, min_size: int = 0,
+                            output_dir: str, padding: float = 1.5, min_size: int = 0, max_size: int = 100,
                             verbosity: int = 0) -> None:
     '''extracts celestials objects from image_data to fits fil in directory'''
     
     total_files = 0
+    records_class = fhc.Thumbnail_Handling(_save_to_fits, output_dir)
     for i, obj in enumerate(celestial_objects):
-        cropped_data = _extract_object(obj, image_data, padding, min_size, verbosity)
+        cropped_data = _extract_object(obj, image_data, padding, min_size, max_size, verbosity)
       
         if type(cropped_data) != type(None):
 
             curr_file_name = file_name + f"object_{i + 1}.fits"
             file_address = os.path.join(output_dir, curr_file_name)
 
-            image_meta_data = _update_meta_data(obj, image_meta_data)
+            image_meta_data = _update_meta_data(obj, cropped_data, image_meta_data)
+            records_class.save_file((file_address, cropped_data, image_meta_data), image_meta_data, curr_file_name)
 
-            _save_to_fits(file_address, cropped_data, image_meta_data)
+            total_files = records_class.get_total_files()
 
-            print(f"Saved: {curr_file_name}")
-            total_files += 1
 
     print(f"total files cropped: {total_files}")
