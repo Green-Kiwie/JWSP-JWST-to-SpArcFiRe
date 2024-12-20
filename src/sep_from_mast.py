@@ -114,6 +114,12 @@ def _run_sep(filepath: str) -> bool:
     _get_thumbprints(output_filepath, original_image_name, scaled_image, 
                      image_meta_data, celestial_objects,)
 
+def _log_errored_download(filename_prefix: str, uri: str) -> None:
+    '''writes to a file a particular file that was unable to download'''
+    filepath = f"{filename_prefix}_log.txt"
+    with open(filepath, 'a') as file:
+        file.write(f"unable to download {uri} \n")
+
 
 if __name__ == '__main__':
     filepath = _get_filepath()
@@ -123,12 +129,20 @@ if __name__ == '__main__':
     count = 0
     total = len(uris)
     for uri in uris:
-        download_filepath = _download_uri(uri)
-        sep_run = _run_sep(download_filepath)
-        file_remove = _remove_fits(download_filepath)
+        for _ in range(5):
+            try:
+                download_filepath = _download_uri(uri)
+                sep_run = _run_sep(download_filepath)
+                file_remove = _remove_fits(download_filepath)
+                
+                count += 1
+                print(f"SEP run on {count}/{total} files")
+                break
+            except:
+                pass
+        else:
+            _log_errored_download("output/mast_csv_error", uri)
         
-        count += 1
-        print(f"SEP run on {count}/{total} files")
 
     print(f'sep run successfully on {len(uris)} files')
 
