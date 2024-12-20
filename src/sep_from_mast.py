@@ -120,10 +120,15 @@ if __name__ == '__main__':
     uris = _get_uri_list(filepath)
     uris = _filter_uris(uris)
 
+    count = 0
+    total = len(uris)
     for uri in uris:
         download_filepath = _download_uri(uri)
         sep_run = _run_sep(download_filepath)
         file_remove = _remove_fits(download_filepath)
+        
+        count += 1
+        print(f"SEP run on {count}/{total} files")
 
     print(f'sep run successfully on {len(uris)} files')
 
