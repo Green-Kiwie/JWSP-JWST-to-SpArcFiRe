@@ -142,6 +142,8 @@ if __name__ == '__main__':
                 pass
         else:
             _log_errored_download("output/mast_csv_error", uri)
+            count += 1
+            print("File unable to download, error logged.")
         
 
     print(f'sep run successfully on {len(uris)} files')
