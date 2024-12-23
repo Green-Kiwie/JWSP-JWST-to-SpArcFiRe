@@ -7,6 +7,8 @@ print(sys.path[0])
 
 import sep_helpers as sh
 import mast_interactor as mi
+import file_handling_class as fhc
+
 import pathlib
 import pandas as pd
 import numpy as np
@@ -88,18 +90,19 @@ def _create_directory(name: str) -> None:
         print(f"An error occurred: {e}")
 
 def _get_thumbprints(output_dir: str, original_image_name: str, image_data: np.ndarray, 
-                     image_meta_data: dict, celestial_objects: np.ndarray) -> None:
+                     image_meta_data: dict, celestial_objects: np.ndarray, records_object: fhc.Thumbnail_Handling) -> None:
     '''splits image image into files'''
     verbosity = 0
     _create_directory(output_dir)
     file_prename = original_image_name[:-5] + '_'
     sh.extract_objects_to_file(image_data, image_meta_data, file_prename, celestial_objects, 
-                               output_dir, min_size = _MIN_SIZE, max_size = _MAX_SIZE, verbosity = verbosity)
+                               output_dir, min_size = _MIN_SIZE, max_size = _MAX_SIZE, 
+                               verbosity = verbosity, records_class = records_object)
     
 
-def _run_sep(filepath: str) -> bool:
+def _run_sep(download_filepath: str, output_filepath: str, records_object: fhc.Thumbnail_Handling) -> bool:
     '''runs sep on filepath and return bool value for success'''
-    image_data = sh.get_main_fits_data(filepath)
+    image_data = sh.get_main_fits_data(download_filepath)
     
 
     background_rms = sh.get_image_background(image_data)
@@ -107,18 +110,17 @@ def _run_sep(filepath: str) -> bool:
     celestial_objects = sh.extract_objects(backgroundless_data, background_rms)
     scaled_image = sh.scale_fits_data(backgroundless_data)
 
-    image_meta_data = sh.get_relevant_fits_meta_data(filepath)
+    image_meta_data = sh.get_relevant_fits_meta_data(download_filepath)
 
-    original_image_name = pathlib.Path(filepath).name
-    output_filepath = 'output/objects_from_mast_csv/'
+    original_image_name = pathlib.Path(download_filepath).name
     _get_thumbprints(output_filepath, original_image_name, scaled_image, 
-                     image_meta_data, celestial_objects,)
+                     image_meta_data, celestial_objects, records_object)
 
-def _log_errored_download(filename_prefix: str, uri: str) -> None:
+def _log_errored_download(filename_prefix: str, uri: str, error: str) -> None:
     '''writes to a file a particular file that was unable to download'''
     filepath = f"{filename_prefix}_log.txt"
     with open(filepath, 'a') as file:
-        file.write(f"unable to download {uri} \n")
+        file.write(f"unable to download {uri}, {error} \n")
 
 
 if __name__ == '__main__':
@@ -128,20 +130,26 @@ if __name__ == '__main__':
 
     count = 0
     total = len(uris)
+    output_filepath = 'output/objects_from_mast_csv/'
+
+    records_class = fhc.Thumbnail_Handling(sh.save_to_fits, output_filepath)
+    
     for uri in uris:
         for _ in range(5):
             try:
                 download_filepath = _download_uri(uri)
-                sep_run = _run_sep(download_filepath)
+                sep_run = _run_sep(download_filepath, output_filepath, records_class)
                 file_remove = _remove_fits(download_filepath)
                 
                 count += 1
                 print(f"SEP run on {count}/{total} files")
                 break
-            except:
+            except Exception as e:
+                print(f"error: {e}")
+                error = e
                 pass
         else:
-            _log_errored_download("output/mast_csv_error", uri)
+            _log_errored_download("output/mast_csv_error", uri, error)
             count += 1
             print("File unable to download, error logged.")
         

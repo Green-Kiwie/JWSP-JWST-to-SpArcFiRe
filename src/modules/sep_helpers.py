@@ -155,7 +155,7 @@ def _get_thumbnail_coord(max_half_size: int, x_coord: int, y_coord: int, image_d
     y_max = min(image_data.shape[0], y_coord + max_half_size)
     return x_min, x_max, y_min, y_max
 
-def _save_to_fits(filepath: str, image_data: np.ndarray, image_meta_data: dict) -> None:
+def save_to_fits(filepath: str, image_data: np.ndarray, image_meta_data: dict) -> None:
     '''saves a file to a non multi extension fits file'''
     hdu = fits.PrimaryHDU(data=image_data)
     for key in image_meta_data:
@@ -246,11 +246,13 @@ def _update_meta_data(obj_data: np.ndarray, image_data: np.ndarray, current_meta
 
 def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_name: str, celestial_objects: np.ndarray, 
                             output_dir: str, padding: float = 1.5, min_size: int = 0, max_size: int = 100,
-                            verbosity: int = 0) -> None:
+                            verbosity: int = 0, records_class: fhc.Thumbnail_Handling = None) -> None:
     '''extracts celestials objects from image_data to fits fil in directory'''
     
     total_files = 0
-    records_class = fhc.Thumbnail_Handling(_save_to_fits, output_dir)
+    if records_class == None:
+        records_class = fhc.Thumbnail_Handling(save_to_fits, output_dir)
+    
     for i, obj in enumerate(celestial_objects):
         cropped_data = _extract_object(obj, image_data, padding, min_size, max_size, verbosity)
       
