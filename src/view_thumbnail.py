@@ -45,7 +45,7 @@ def _get_val_len(value: bool|str|int|float) -> int:
 
 
 def _get_max_len(values: list) -> int:
-    '''get the max length of a data name/key'''
+    '''get the max length of a data name/key up to 30'''
     max_length = 1
     for val in values:
         length = _get_val_len(val)
@@ -53,14 +53,14 @@ def _get_max_len(values: list) -> int:
         if length > max_length:
             max_length = length
 
-    return max_length
+    return min(max_length, 30)
 
 def _print_info(key: str, meta_data: str, comment: str, max_name_len: int, max_value_len: int) -> None:
     '''formats a single line of thumbnail info'''
-    print(key, end = '')
+    print(key[: max_name_len], end = '')
     print(' '*(max_name_len - _get_val_len(key)), end = '')
     print(': ', end = '')
-    print(meta_data, end = '')
+    print(str(meta_data)[: max_value_len], end = '')
     print(' '*(max_value_len - _get_val_len(meta_data)), end = '')
     print(': ', end = '')
     print(comment)

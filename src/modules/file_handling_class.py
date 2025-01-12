@@ -7,25 +7,23 @@ import math
 
 def _get_pos_of_file(filepath: str) -> tuple[float, float]:
     meta_data = sh.get_all_fits_meta_data(filepath)
-    obj_ra = meta_data['OBJ_RA']
-    obj_dec = meta_data['OBJ_DEC']
 
     gal_pos = Gal_Pos(meta_data)
-    # print(f'object: {obj_ra}, {obj_dec}')
+    # print(f'object: {meta_data['OBJ_RA']}, {meta_data['OBJ_DEC']}')
     return gal_pos
 
 class Gal_Pos:
     def __init__(self, image_meta_data: np.ndarray):
         pixel_size = image_meta_data['PIXAR_A2'][0]
         pixel_width = math.sqrt(pixel_size)
-        ori_pos_x = image_meta_data['ORIAXIS1'][0]/2
-        ori_pos_y = image_meta_data['ORIAXIS2'][0]/2
-        img_width = image_meta_data['NAXIS1'][0]* pixel_width
-        img_height = image_meta_data['NAXIS2'][0]* pixel_width 
+        ori_pos_x = image_meta_data['SUBSIZE1'][0]/2
+        ori_pos_y = image_meta_data['SUBSIZE2'][0]/2
+        img_width = image_meta_data['N_NAXIS1'][0]* pixel_width
+        img_height = image_meta_data['N_NAXIS2'][0]* pixel_width 
         x_pos_in_image = image_meta_data['ORI_POSX'][0]
         y_pos_in_image = image_meta_data['ORI_POSY'][0]
-        ori_ra = image_meta_data['ORI_RA'][0]
-        ori_dec = image_meta_data['ORI_DEC'][0]
+        ori_ra = image_meta_data['TARG_RA'][0]
+        ori_dec = image_meta_data['TARG_DEC'][0]
         
         topleft_x = x_pos_in_image - img_width/2
         topleft_y = y_pos_in_image - img_height/2

@@ -52,6 +52,7 @@ def get_all_fits_meta_data(filepath: str) -> dict[tuple[any, any]]:
 
     return output
 
+
 def get_relevant_fits_meta_data(filepath: str) -> dict:
     '''
     gets relevant meta data to calculating meta data for extracted objects.
@@ -60,35 +61,40 @@ def get_relevant_fits_meta_data(filepath: str) -> dict:
     hdul = fits.open(filepath)
 
     relevant_meta_data = dict()
-    # print(hdul.info())
 
     try:
         primary_data = hdul['PRIMARY'].header
-    except:
+    except KeyError:
         primary_data = hdul[0].header
 
-    # print("primary header: ", primary_data)
-    meta_data_list = [('DATE-BEG', 'DATE-BEG', 'Begin datetime of the exposure'),
-     ('DATE-END', 'DATE-END', 'END datetime of the exposure'),
-     ('OBS_ID', 'OBS_ID', 'Observation ID'),
-     ('ORI_RA', 'TARG_RA', 'RA Position of original image'),
-     ('ORI_DEC', 'TARG_DEC', 'DEC Position of original image'),
-     ('EFFEXPTM', 'EFFEXPTM','Effective exposure time of image in second'),
-     ('ORIAXIS1', 'SUBSIZE1', 'number of pixels in original image axis 1'),
-     ('ORIAXIS2', 'SUBSIZE2', 'number of pixels in original image axis 2')
-    ]
-    for new_key, key, description in meta_data_list:
-        relevant_meta_data[new_key] = (primary_data[key], description)
+    description_data = primary_data.comments
+    for key in primary_data.keys():
+        relevant_meta_data[key] = (primary_data[key], description_data[key])
+
+    # meta_data_list = [('DATE-BEG', 'DATE-BEG', 'Begin datetime of the exposure'),
+    #  ('DATE-END', 'DATE-END', 'END datetime of the exposure'),
+    #  ('OBS_ID', 'OBS_ID', 'Observation ID'),
+    #  ('ORI_RA', 'TARG_RA', 'RA Position of original image'),
+    #  ('ORI_DEC', 'TARG_DEC', 'DEC Position of original image'),
+    #  ('EFFEXPTM', 'EFFEXPTM','Effective exposure time of image in second'),
+    #  ('ORIAXIS1', 'SUBSIZE1', 'number of pixels in original image axis 1'),
+    #  ('ORIAXIS2', 'SUBSIZE2', 'number of pixels in original image axis 2')
+    # ]
+    # for new_key, key, description in meta_data_list:
+    #     relevant_meta_data[new_key] = (primary_data[key], description)
     
     try:
         image_data_header = hdul['SCI'].header
-    except:
-        primary_data = hdul[0].header
+    except KeyError:
+        image_data_header = hdul[0].header
 
-    # print("sci header", image_data_header)
-    relevant_meta_data['PIXAR_A2'] = (image_data_header['PIXAR_A2'], 'Area of each pixel in arcsecond^2')
-    
+    description_data2 = image_data_header.comments
+    for key in image_data_header.keys():
+        relevant_meta_data[key] = (image_data_header[key], description_data2[key])
+
     hdul.close()
+
+    print(relevant_meta_data)
     return relevant_meta_data
     
 def scale_fits_data(image_data: np.ndarray) -> np.ndarray:
@@ -159,7 +165,12 @@ def save_to_fits(filepath: str, image_data: np.ndarray, image_meta_data: dict) -
     '''saves a file to a non multi extension fits file'''
     hdu = fits.PrimaryHDU(data=image_data)
     for key in image_meta_data:
-        hdu.header[key] = image_meta_data[key]
+        try:
+            hdu.header[key] = image_meta_data[key]
+        except:
+            # print("unable to save pair in thumbnail meta_data: key:", key, ", value: ", image_data_header[key])
+            pass
+        # hdu.header[key] = image_meta_data[key]
     
     hdu.writeto(filepath, overwrite=True)
     print(f"Saved: {filepath}")
@@ -201,22 +212,37 @@ def _gal_dist_estimate(gal_diameter: float) -> float:
     return distance
 
 
+def _get_gal_size(obj_data: np.ndarray, meta_data: dict) -> tuple[float, float]:
+    '''returns the galaxy height and width'''
+    pixel_size = meta_data['PIXAR_A2'][0]
+    pixel_width = math.sqrt(pixel_size)
 
+    gal_width = obj_data['a']* pixel_width
+    gal_height = obj_data['b']* pixel_width 
+    return gal_width, gal_height
+
+def _get_gal_position(obj_data: np.ndarray, meta_data: dict) -> tuple[float, float]:
+    '''returns the RA and DEC of the extracted galaxy'''
+    ori_pos_x, ori_pos_y = meta_data['SUBSIZE1'][0]/2, meta_data['SUBSIZE2'][0]/2
+    x_pos_in_image, y_pos_in_image = int(obj_data['x']), int(obj_data['y'])
+    ori_ra = meta_data['TARG_RA'][0]
+    ori_dec = meta_data['TARG_DEC'][0]
+    pixel_size = meta_data['PIXAR_A2'][0]
+    obj_ra, obj_dec = resolve.resolve_position(pixel_size, ori_pos_x, ori_pos_y, 
+                                x_pos_in_image, y_pos_in_image, 
+                                ori_ra, ori_dec)
+    return obj_ra, obj_dec
 
 def _update_meta_data(obj_data: np.ndarray, image_data: np.ndarray, current_meta_data: dict) -> dict:
     '''updates meta data for particular image'''
     new_meta_data = current_meta_data.copy()
-    pixel_size = new_meta_data['PIXAR_A2'][0]
-    pixel_width = math.sqrt(pixel_size)
 
-    
-    gal_width = obj_data['a']* pixel_width
-    gal_height = obj_data['b']* pixel_width 
+    gal_width,  gal_height = _get_gal_size(obj_data, new_meta_data)
 
     gal_pix_width = image_data.shape[1]
     gal_pix_height = image_data.shape[0]
-    new_meta_data['NAXIS1'] = (gal_pix_width, 'width of thumbnail')
-    new_meta_data['NAXIS2'] = (gal_pix_height, 'height of thumbnail')
+    new_meta_data['N_NAXIS1'] = (gal_pix_width, 'width of thumbnail')
+    new_meta_data['N_NAXIS2'] = (gal_pix_height, 'height of thumbnail')
 
     x_center, y_center = int(obj_data['x']), int(obj_data['y'])
     new_meta_data['ORI_POSX'] = (x_center, 'original pixel x position of thumbnail')
@@ -224,17 +250,11 @@ def _update_meta_data(obj_data: np.ndarray, image_data: np.ndarray, current_meta
 
 
     gal_diameter = math.sqrt(gal_width*gal_width + gal_height*gal_height)
-    new_meta_data['GALX'] = (gal_width, 'width of galaxy in arcseconds')
-    new_meta_data['GALY'] = (gal_height, 'height of galaxy in arcseconds')
-    new_meta_data['GALDIAM'] = (gal_diameter, 'diameter of galaxy in arcseconds')
+    new_meta_data['N_GALX'] = (gal_width, 'width of galaxy in arcseconds')
+    new_meta_data['N_GALY'] = (gal_height, 'height of galaxy in arcseconds')
+    new_meta_data['N_GALDIA'] = (gal_diameter, 'diameter of galaxy in arcseconds')
     
-    ori_pos_x, ori_pos_y = current_meta_data['ORIAXIS1'][0]/2, current_meta_data['ORIAXIS2'][0]/2
-    x_pos_in_image, y_pos_in_image = int(obj_data['x']), int(obj_data['y'])
-    ori_ra = current_meta_data['ORI_RA'][0]
-    ori_dec = current_meta_data['ORI_DEC'][0]
-    obj_ra, obj_dec = resolve.resolve_position(pixel_size, ori_pos_x, ori_pos_y, 
-                                x_pos_in_image, y_pos_in_image, 
-                                ori_ra, ori_dec)
+    obj_ra, obj_dec = _get_gal_position(obj_data, new_meta_data)
     new_meta_data['OBJ_RA'] = (obj_ra, 'RA of galaxy')
     new_meta_data['OBJ_DEC'] = (obj_dec, 'DEC of galaxy')
     
