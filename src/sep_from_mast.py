@@ -108,12 +108,12 @@ def _run_sep(download_filepath: str, output_filepath: str, records_object: fhc.T
     background_rms = sh.get_image_background(image_data)
     backgroundless_data = sh.subtract_bkg(image_data)
     celestial_objects = sh.extract_objects(backgroundless_data, background_rms)
-    scaled_image = sh.scale_fits_data(backgroundless_data)
+    # scaled_image = sh.scale_fits_data(backgroundless_data)
 
     image_meta_data = sh.get_relevant_fits_meta_data(download_filepath)
 
     original_image_name = pathlib.Path(download_filepath).name
-    _get_thumbprints(output_filepath, original_image_name, scaled_image, 
+    _get_thumbprints(output_filepath, original_image_name, backgroundless_data, 
                      image_meta_data, celestial_objects, records_object)
 
 def _log_errored_download(filename_prefix: str, uri: str, error: str) -> None:
