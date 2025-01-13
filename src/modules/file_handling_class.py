@@ -87,7 +87,7 @@ class Thumbnail_Handling:
         
         return True
 
-    def _add_record(self, gal_pos: Gal_Pos) -> bool:
+    def _add_record_ignore_duplicate(self, gal_pos: Gal_Pos) -> bool:
         '''if position does not exist, add record to self. 
         if position is added, return true. else, return false'''
         position = gal_pos.get_pos()
@@ -96,15 +96,28 @@ class Thumbnail_Handling:
             return True
         else:
             return False
+        
+    def _add_record_include_duplicate(self, gal_pos: Gal_Pos) -> bool:
+        '''if position does not exist, add record to self. 
+        if position is added, return true. else, return false'''
+        self._coords.add(gal_pos)
+        return True
 
 
-    def save_file(self, save_function_parameters: tuple[any], image_meta_data: np.ndarray, filename: str) -> None:
+    def save_file_ignore_duplicate(self, save_function_parameters: tuple[any], image_meta_data: np.ndarray, filename: str) -> None:
         '''if position does not exist, save file. else, ignore file'''
         gal_pos = Gal_Pos(image_meta_data)
 
-        if self._add_record(gal_pos) == False:
+        if self._add_record_ignore_duplicate(gal_pos) == False:
             print(f"object {filename} not saved as position already exists")
             return None
+        
+        self._saving_function(*save_function_parameters)
+
+    def save_file_include_duplicate(self, save_function_parameters: tuple[any], image_meta_data: np.ndarray, filename: str) -> None:
+        '''if position does not exist, save file. else, ignore file'''
+        gal_pos = Gal_Pos(image_meta_data)
+        self._add_record_include_duplicate(gal_pos)
         
         self._saving_function(*save_function_parameters)
 

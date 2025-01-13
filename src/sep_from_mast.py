@@ -131,6 +131,7 @@ if __name__ == '__main__':
     count = 0
     total = len(uris)
     output_filepath = 'output/objects_from_mast_csv/'
+    _create_directory(output_filepath)
 
     records_class = fhc.Thumbnail_Handling(sh.save_to_fits, output_filepath)
     

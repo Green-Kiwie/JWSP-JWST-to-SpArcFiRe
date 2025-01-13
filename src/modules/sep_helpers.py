@@ -94,7 +94,7 @@ def get_relevant_fits_meta_data(filepath: str) -> dict:
 
     hdul.close()
 
-    print(relevant_meta_data)
+    # print(relevant_meta_data)
     return relevant_meta_data
     
 def scale_fits_data(image_data: np.ndarray) -> np.ndarray:
@@ -282,7 +282,7 @@ def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_
             file_address = os.path.join(output_dir, curr_file_name)
 
             image_meta_data = _update_meta_data(obj, cropped_data, image_meta_data)
-            records_class.save_file((file_address, cropped_data, image_meta_data), image_meta_data, curr_file_name)
+            records_class.save_file_include_duplicate((file_address, cropped_data, image_meta_data), image_meta_data, curr_file_name)
 
             total_files = records_class.get_total_files()
 
