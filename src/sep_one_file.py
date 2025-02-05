@@ -79,8 +79,7 @@ def _get_thumbprints(output_filepath: str, image_data: np.ndarray, image_meta_da
     _create_directory(directory)
     sh.extract_objects_to_file(image_data, image_meta_data, '', celestial_objects, directory, min_size = _MIN_SIZE, max_size = _MAX_SIZE, verbosity = verbosity)
     
-    
-if __name__ == "__main__":
+def run():
     file_name = _get_file_name()
 
     image_data = sh.get_main_fits_data(file_name)
@@ -100,5 +99,8 @@ if __name__ == "__main__":
     pure_name = pathlib.Path(file_name).name
     output_filepath = 'output/' + pure_name[:-5]
     _get_thumbprints(output_filepath, scaled_image, image_meta_data, celestial_objects,)
+    
+if __name__ == "__main__":
+    run()
 
 

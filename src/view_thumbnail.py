@@ -84,7 +84,7 @@ def _print_one_file(filename: str) -> None:
     image_data = sh.get_main_fits_data(filename)
     sh.show_fits_image(image_data, f"Thumbnail of {filename}")
 
-if __name__ == '__main__':
+def run() -> None:
     file_name, file_type = _get_file_name()
 
     if file_type == 'dir':
@@ -95,6 +95,9 @@ if __name__ == '__main__':
 
     elif file_type == 'fits':
         _print_one_file(file_name)
+
+if __name__ == '__main__':
+    run()
 
 
     
