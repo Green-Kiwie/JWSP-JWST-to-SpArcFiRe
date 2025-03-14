@@ -13,16 +13,17 @@ with open('randomforest_training_data/output.txt', 'w') as sys.stdout:
     target_value = training_data["P_spiral"]
 
     #encode columns
-    categorical_cols = training_data.select_dtypes(include=["object", "category"]).columns
+    categorical_cols = training_values.select_dtypes(include=["object", "category"]).columns
     print(list(categorical_cols))
-    encoded_data = training_data
 
+    encoded_data = training_values
     le = LabelEncoder()
     for col in categorical_cols:
         encoded_data[col] = le.fit_transform(encoded_data[col])
 
     #splitting training and testing data
     X_train, X_test, y_train, y_test = train_test_split(encoded_data, target_value, test_size=0.2, random_state=42)
+    
 
     rf = RandomForestRegressor(n_estimators=150, random_state=42, max_features=40)
     rf.fit(X_train, y_train)
