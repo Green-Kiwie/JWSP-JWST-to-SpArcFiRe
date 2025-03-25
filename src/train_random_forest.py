@@ -1,5 +1,5 @@
 import sys
-import randomforest_training_data as rf
+import random_forest_trainer as rf
 
 
 arguments = sys.argv
