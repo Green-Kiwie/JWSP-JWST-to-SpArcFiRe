@@ -1,11 +1,9 @@
 import sys
 import randomforest_training_data as rf
 
-<<<<<<< HEAD
-arguments = sys.args
-=======
+
 arguments = sys.argv
->>>>>>> 766ed5d (added random forest training code)
+
 trees_start = arguments[0]
 trees_end = arguments[1]
 trees_step = arguments[2]
