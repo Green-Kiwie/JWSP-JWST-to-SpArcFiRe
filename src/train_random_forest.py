@@ -1,4 +1,7 @@
 import sys
+
+sys.path[0] += ('/modules')
+print(sys.path[0])
 import random_forest_trainer as rf
 
 
