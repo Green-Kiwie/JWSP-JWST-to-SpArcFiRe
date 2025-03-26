@@ -6,7 +6,7 @@ from sklearn.preprocessing import LabelEncoder
 
 def read_training_data(filepath: str = "randomforest_training_data/data.csv") -> pd.DataFrame:
     """reads csv filepath and loads into dataframe object"""
-    training_data = pd.read_csv()
+    training_data = pd.read_csv(filepath)
     return training_data
 
 def get_target_training(data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
