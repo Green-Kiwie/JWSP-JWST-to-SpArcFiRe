@@ -18,7 +18,7 @@ feature_step = int(arguments[6])
 for tree in range(trees_start, trees_end, trees_step):
     for feature in range(feature_start, feature_end, feature_step):
         training_output = rf.read_train(tree, feature)
-        with open("random_forest_output.txt", 'w') as file:
+        with open("random_forest_output.txt", 'a') as file:
             file.write(training_output)
 
 
