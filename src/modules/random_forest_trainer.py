@@ -22,7 +22,7 @@ class RandomForestTrainer:
     def test_x(self, percentage = 1) -> pd.DataFrame:
         """returns a certain percentage of the testing dataset, default 100%"""
         dataset = self.full_dataset()[self.full_dataset()["split_type"] == "test"].drop(["P_spiral"])
-        return dataset.sample(frac=0.3, random_state=1)
+        return dataset.sample(frac=percentage, random_state=1)
         
     def train_y(self) -> pd.DataFrame:
         """returns the training dataset"""
@@ -77,7 +77,7 @@ class RandomForestTrainer:
 #     return output 
 
 
-    def _load_training_data(self, split_test_train_function: Callable[[pd.DataFrame, pd.Series]], split_test_train_kwargs: dict, filepath: str = "randomforest_training_data/data.csv") -> pd.DataFrame:
+    def _load_training_data(self, split_test_train_function: Callable, split_test_train_kwargs: dict, filepath: str = "randomforest_training_data/data.csv") -> pd.DataFrame:
         """reads csv filepath and loads into dataframe object, adds P_spiral value"""
         training_data = pd.read_csv(filepath)
         training_data = self._get_target(training_data)
