@@ -59,11 +59,13 @@ class RandomForestTrainer:
     def summary_msg(self) -> str:
         """returns a string of format: 
         'for {num of trees} and {num of features} features, training r^2: {accuracy score}, testing r^2: {accuracy score}'"""
-        return f"for {self.num_trees()} trees and {self.num_features()} features, training data accuracy: {self.training_r2():.2f}, testing data accuracy: {self.testing_r2():.2f} \n"
+        return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data accuracy: {self.training_r2():.2f}, testing data accuracy: {self.testing_r2():.2f} \n"
     
-    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, split_test_inputs: dict = {"random_state": 42, "test_size": 0.2}):
+    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}):
         self._num_trees = num_trees
         self._num_features = num_features
+        self._buckets = split_test_inputs["num_buckets"]
+
         self._full_dataset = self._load_training_data(split_test_train_function, split_test_inputs)
         self._transformed_dataset, self._data_transformer = self.transform_data()
 
