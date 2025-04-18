@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import mean_squared_error
 
 from typing import Callable
 
@@ -56,10 +57,23 @@ class RandomForestTrainer:
         """returns the r^2 measure (accuracy measure) of the random forest model on the testing data"""
         return self._rf_model.score(self.test_x(), self.test_y())
         
+    def training_rmse(self) -> float:
+        """returns the rmse measure (accuracy measure) of the random forest model on training data"""
+        predictions = self._rf_model.predict(self.train_x())
+        rmse = np.sqrt(mean_squared_error(self.train_y(), predictions))
+        return rmse
+
+    def testing_rmse(self) -> float:
+        """returns the rmse measure (accuracy measure) of the random forest model on the testing data"""
+        predictions = self._rf_model.predict(self.test_x())
+        rmse = np.sqrt(mean_squared_error(self.test_y(), predictions))
+        return rmse
+
+    
     def summary_msg(self) -> str:
         """returns a string of format: 
         'for {num of trees} and {num of features} features, training r^2: {accuracy score}, testing r^2: {accuracy score}'"""
-        return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data accuracy: {self.training_r2():.2f}, testing data accuracy: {self.testing_r2():.2f} \n"
+        return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data r^2: {self.training_r2():.2f}, testing data r^2: {self.testing_r2():.2f}, training data rmse: {self.training_rmse():.2f}, testing data rmse: {self.testing_rmse():.2f} \n"
     
     def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}):
         self._num_trees = num_trees
@@ -120,7 +134,6 @@ class RandomForestTrainer:
         return training_data
     
 
-#function method is flawed, but good idea to just test first. eventually need to implement selection correctly. now would be the same as normal selection
 def bucket_based_split_test(x_data: pd.DataFrame, y_data: pd.Series, num_buckets = 10, random_state = 42, test_size = 0.2) -> tuple[pd.DataFrame, pd.DataFrame, None, None]:
     """function that splits data based on buckets"""
     x_test = pd.DataFrame()
@@ -137,7 +150,7 @@ def bucket_based_split_test(x_data: pd.DataFrame, y_data: pd.Series, num_buckets
         bucket_max = round((i+1)*bucket_step, 3)
         
         if (i == num_buckets-1):
-            bucket_values = x_data[(x_data["P_spiral"] >= bucket_min) & (x_data["P_spiral"] <= bucket_max)]
+            bucket_values = x_data[(x_data["P_spiral"] >= bucket_min)]
         else:
             bucket_values = x_data[(x_data["P_spiral"] >= bucket_min) & (x_data["P_spiral"] < bucket_max)]
         print(f"bucket range: {bucket_min} to {bucket_max}, {len(bucket_values)} items")
