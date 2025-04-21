@@ -2,18 +2,29 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import pandas as pd
 
-filepath = Path("random_forest_output/to_plot.csv")
+def plot_fig(filepath: Path) -> plt.Figure:
+    data = pd.read_csv(filepath)
 
-data = pd.read_csv(filepath)
-print(data.columns)
+    x_col = 'P_spiral'
+    y_col = 'P_spiral_predicted'
 
-x_col = 'P_spiral'
-y_col = 'P_spiral_predicted'
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.scatter(data[x_col], data[y_col], alpha=0.7, s=0.5)
+    ax.set_xlabel(x_col)
+    ax.set_ylabel(y_col)
+    ax.set_title(f"{y_col} vs {x_col}")
+    ax.grid(True)
 
-plt.figure(figsize=(8, 6))
-plt.scatter(data[x_col], data[y_col], alpha=0.7)
-plt.xlabel(x_col)
-plt.ylabel(y_col)
-plt.title(f"{y_col} vs {x_col}")
-plt.grid(True)
-plt.show()
+    return fig
+
+def get_plt_name(filepath: Path) -> Path:
+    output = filepath.parent
+    output /= filepath.stem
+    return Path(output)
+
+for file in Path("random_forest_output/").iterdir():
+    if file.suffix == ".csv":
+        fig = plot_fig(file)
+        fig.savefig(get_plt_name(file), dpi = 300, bbox_inches='tight')
+        print("plotted for", file)
+
