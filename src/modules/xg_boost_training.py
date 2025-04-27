@@ -57,7 +57,7 @@ class XGBoostTrainer:
         return rmse
 
     def summary_msg(self) -> str:
-        return f"for {self.num_trees()} trees, training data r^2: {self.training_r2():.10f}, testing data r^2: {self.testing_r2():.10f}, training data rmse: {self.training_rmse():.10f}, testing data rmse: {self.testing_rmse():.10f} \n"
+        return f"for {self.num_trees()} trees and {self.num_features()} features, training data r^2: {self.training_r2():.10f}, testing data r^2: {self.testing_r2():.10f}, training data rmse: {self.training_rmse():.10f}, testing data rmse: {self.testing_rmse():.10f} \n"
     
     def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, split_test_inputs: dict = {"random_state": 42, "test_size": 0.2}):
         self._num_trees = num_trees
@@ -74,7 +74,7 @@ class XGBoostTrainer:
 
     def _train_xgboost(self, x_train, y_train, num_trees, num_features) -> XGBRegressor: 
         """trains XGBoost model"""
-        xgb = XGBRegressor(n_estimators=num_trees, random_state=42, verbosity=0) 
+        xgb = XGBRegressor(n_estimators=num_trees, random_state=42, verbosity=0 , colsample_bynode = num_features) 
         #use either colsample_bytree, colsample_bylevel or colsample_bynode to simulate the num_features in random forest
         xgb.fit(x_train, y_train)
         return xgb
