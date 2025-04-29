@@ -1,5 +1,6 @@
 import sys
 import traceback
+import numpy as np
 
 sys.path[0] += ('/modules')
 print(sys.path[0])
@@ -18,7 +19,7 @@ try:
     features_step = float(arguments[6])
 
     for tree in range(trees_start, trees_end, trees_step):
-        for feature in range(features_start, features_end, features_step):
+        for feature in np.arange(features_start, features_end, features_step):
             print(f"starting training for {tree} trees and {feature} features")
             trained_model = xgb.XGBoostTrainer(tree, feature)
             print(trained_model.summary_msg())
