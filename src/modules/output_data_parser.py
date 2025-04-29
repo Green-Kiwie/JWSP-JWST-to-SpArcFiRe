@@ -9,6 +9,22 @@ def read_csv(file: Path) -> pd.DataFrame:
     """reads a csv file"""
     return pd.read_csv(file)
 
+def read_csvs(files: list[Path]) -> pd.DataFrame:
+    """reads csv of multiple random tree outputs"""
+    output_pd = _get_testing_data(pd.read_csv(files[0]))
+    count = 0
+    for filepaths in files[1:]:
+        temp_pd = _get_testing_data(pd.read_csv(filepaths))
+        count += 1
+        new_column_name = f'P_spiral_predicted_{count}'
+        temp_pd = temp_pd.rename(columns={'P_spiral_predicted': new_column_name})
+        output_pd = pd.merge(output_pd, temp_pd[['name', new_column_name]], on='name', how='left')
+    
+    predicted_cols = [col for col in output_pd.columns if col.startswith('P_spiral_predicted')]
+    output_pd["P_spiral_predicted"] = output_pd[predicted_cols].mean(axis=1)
+
+    return output_pd
+
 def plot_fig(data: pd.DataFrame) -> plt.Figure:
     """plts a figure of actual P-spiral against prediction p_spiral"""
     x_col = 'P_spiral'
@@ -25,6 +41,32 @@ def plot_fig(data: pd.DataFrame) -> plt.Figure:
     ax.grid(True)
 
     return fig
+
+# def plot_meta_tree_fig(data: pd.DataFrame) -> plt.Figure:
+#     """Plots P_spiral vs all predicted P_spiral columns on the same scatter plot."""
+#     x_col = 'P_spiral'
+
+#     predicted_cols = [col for col in data.columns if col.startswith('P_spiral_predicted')]
+
+#     fig, ax = plt.subplots(figsize=(8, 6))
+
+#     testing_rmse = _get_meta_rmse(predicted_cols, data)
+
+#     for col in predicted_cols:
+#         ax.scatter(data[x_col], data[col], alpha=0.5, s=0.4, label=col)
+
+#     ax.set_xlabel(x_col)
+#     ax.set_ylabel("Predicted P_spiral")
+#     ax.set_title(f"Predicted P_spiral vs Actual P_spiral \n RMSE: {testing_rmse}")
+#     ax.grid(True)
+#     ax.legend(markerscale=5, fontsize='small')  # Adjust legend size for small markers
+
+#     return fig
+
+def _get_meta_rmse(predicted_cols: list[str], data) -> float:
+    y_pred = pd.concat([data[col] for col in predicted_cols], ignore_index=True)
+    y_true = pd.concat([data["P_spiral"]] * len(predicted_cols), ignore_index=True)
+    return np.sqrt(mean_squared_error(y_true, y_pred))
 
 def _get_testing_data(data: pd.DataFrame) -> pd.DataFrame:
     """returns the data for testing"""

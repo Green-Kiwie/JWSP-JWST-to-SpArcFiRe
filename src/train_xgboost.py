@@ -20,7 +20,7 @@ try:
 
     for tree in range(trees_start, trees_end, trees_step):
         for feature in np.arange(features_start, features_end, features_step):
-            print(f"starting training for {tree} trees and {feature} features")
+            print(f"starting training for {tree} trees and {feature}% of features")
             trained_model = xgb.XGBoostTrainer(tree, feature)
             print(trained_model.summary_msg())
             with open(f"xg_boost.txt", 'a') as file:
