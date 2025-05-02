@@ -31,13 +31,15 @@ def plot_fig(data: pd.DataFrame) -> plt.Figure:
     y_col = 'P_spiral_predicted'
 
     testing_rmse = get_testing_rmse(data)
-    high_p_rmse = get_high_p_rmse(data)
+    p_8_rmse = get_8_p_rmse(data)
+    p_7_rmse = get_7_p_rmse(data)
+    p_6_rmse = get_6_p_rmse(data)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(data[x_col], data[y_col], alpha=0.7, s=0.2)
     ax.set_xlabel(x_col)
     ax.set_ylabel(y_col)
-    ax.set_title(f"{y_col} vs {x_col} \n testing RMSE: {testing_rmse:.10f} \n high P RMSE: {high_p_rmse:.10f}")
+    ax.set_title(f"{y_col} vs {x_col} \n testing RMSE: {testing_rmse:.10f} \n 8 P RMSE: {p_8_rmse:.10f} \n 7 P RMSE: {p_7_rmse:.10f} \n 6 P RMSE: {p_6_rmse:.10f} ")
     ax.grid(True)
 
     return fig
@@ -63,10 +65,10 @@ def plot_fig(data: pd.DataFrame) -> plt.Figure:
 
 #     return fig
 
-def _get_meta_rmse(predicted_cols: list[str], data) -> float:
-    y_pred = pd.concat([data[col] for col in predicted_cols], ignore_index=True)
-    y_true = pd.concat([data["P_spiral"]] * len(predicted_cols), ignore_index=True)
-    return np.sqrt(mean_squared_error(y_true, y_pred))
+# def _get_meta_rmse(predicted_cols: list[str], data) -> float:
+#     y_pred = pd.concat([data[col] for col in predicted_cols], ignore_index=True)
+#     y_true = pd.concat([data["P_spiral"]] * len(predicted_cols), ignore_index=True)
+#     return np.sqrt(mean_squared_error(y_true, y_pred))
 
 def _get_testing_data(data: pd.DataFrame) -> pd.DataFrame:
     """returns the data for testing"""
@@ -85,13 +87,23 @@ def get_testing_rmse(data: pd.DataFrame) -> float:
     return _calculate_rmse(testing_data)
     
 
-def _get_sample_data(data: pd.DataFrame) -> pd.DataFrame:
+def _get_sample_data(data: pd.DataFrame, threshold: float = 0.8) -> pd.DataFrame:
     """gets only the high p_spirals to test model for bias"""
     testing_data = _get_testing_data(data)
-    high_p_spiral_data = testing_data[testing_data["P_spiral"] >= 0.8]
+    high_p_spiral_data = testing_data[testing_data["P_spiral_predicted"] >= threshold]
     return high_p_spiral_data
 
-def get_high_p_rmse(data: pd.DataFrame) -> pd.DataFrame:
+def get_8_p_rmse(data: pd.DataFrame) -> pd.DataFrame:
     """calculates rmse of high p_spirals"""
-    high_p_data = _get_sample_data(data)
+    high_p_data = _get_sample_data(data, 0.8)
+    return _calculate_rmse(high_p_data)
+
+def get_7_p_rmse(data: pd.DataFrame) -> pd.DataFrame:
+    """calculates rmse of high p_spirals"""
+    high_p_data = _get_sample_data(data, 0.7)
+    return _calculate_rmse(high_p_data)
+
+def get_6_p_rmse(data: pd.DataFrame) -> pd.DataFrame:
+    """calculates rmse of high p_spirals"""
+    high_p_data = _get_sample_data(data, 0.6)
     return _calculate_rmse(high_p_data)
