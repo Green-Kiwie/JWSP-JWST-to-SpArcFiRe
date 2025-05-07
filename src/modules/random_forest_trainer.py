@@ -1,9 +1,11 @@
 import pandas as pd
 import numpy as np
+import joblib
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
+from pathlib import Path
 
 from typing import Callable
 
@@ -126,6 +128,13 @@ class RandomForestTrainer:
             encoded_data[col] = le.fit_transform(encoded_data[col])
 
         return encoded_data, le
+    
+    def save_model(self, path: Path) -> None:
+        """saves model to a .pkl file"""
+        if path.suffix != '.pkl':
+            raise ValueError("Filepath must be a pkl file!")
+        joblib.dump(self._rf_model, str(path))
+        print(f"Model saved to {path}.")
     
     @staticmethod
     def _get_target(training_data: pd.DataFrame) -> pd.Series:
