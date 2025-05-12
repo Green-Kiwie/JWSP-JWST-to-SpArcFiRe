@@ -105,6 +105,7 @@ class RandomForestTrainer:
     def _load_training_data(self, split_test_train_function: Callable, split_test_train_kwargs: dict, filepath: str = "randomforest_training_data/data.csv") -> pd.DataFrame:
         """reads csv filepath and loads into dataframe object, adds P_spiral value"""
         dataset = pd.read_csv(filepath)
+        dataset.columns = [col.strip() for col in dataset.columns]
         dataset = self._get_target(dataset)
         dataset = self._split_training_testing_data(dataset, split_test_train_function, split_test_train_kwargs)
         return dataset
