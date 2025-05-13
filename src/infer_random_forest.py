@@ -14,6 +14,7 @@ try:
     model_filepath = Path(str(arguments[3]))
 
     input_data = pd.read_csv(data_filepath)
+    input_data.columns = [col.strip() for col in input_data.columns]
 
     inferer = rfi.random_forest_inferer(model_filepath)
 
