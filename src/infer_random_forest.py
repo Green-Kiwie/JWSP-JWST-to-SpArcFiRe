@@ -14,14 +14,11 @@ try:
     model_filepath = Path(str(arguments[3]))
 
     input_data = pd.read_csv(data_filepath)
-    input_data.columns = [col.strip() for col in input_data.columns]
 
     inferer = rfi.random_forest_inferer(model_filepath)
 
-    # Step 3: Perform prediction on the loaded data
     result_df = inferer.predict(input_data)
 
-    # Step 4: Save the result to the output file
     result_df.to_csv(output_filepath)
     print(f"output saved to {output_filepath}")
 
