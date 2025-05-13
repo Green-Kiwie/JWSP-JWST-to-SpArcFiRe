@@ -136,6 +136,14 @@ class RandomForestTrainer:
             raise ValueError("Filepath must be a pkl file!")
         joblib.dump(self._rf_model, str(path))
         print(f"Model saved to {path}.")
+
+    def save_label_encoder(self, path: Path) -> None:
+        """saves label encoder to a .pkl file"""
+        if path.suffix != '.pkl':
+            raise ValueError("Filepath must be a pkl file!")
+
+        joblib.dump(self._data_transformer, str(path))
+        print(f"Label encoder saved to {path}.")
     
     @staticmethod
     def _get_target(training_data: pd.DataFrame) -> pd.Series:

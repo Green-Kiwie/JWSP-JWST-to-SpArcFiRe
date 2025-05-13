@@ -11,6 +11,7 @@ try:
     trees = int(arguments[1])
     features = int(arguments[2])
     save_file = Path(str(arguments[3]))
+    save_le = Path(str(arguments[4]))
 
     print(f"starting training for {trees} trees, {features} features")
     trained_model = rf.RandomForestTrainer(trees, features, split_test_train_function = rf.bucket_based_split_test, split_test_inputs = {"num_buckets": 1, "random_state": 42, "test_size": 0.2})
