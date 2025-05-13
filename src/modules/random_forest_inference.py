@@ -13,7 +13,9 @@ class random_forest_inferer:
     def predict(self, input_data: pd.DataFrame):
         """infers using the dataframe and returns the dataframe that has a new inferred column. 
         column name is "predicted_spirality" """
-        predictions = self._rf_model.predict(input_data)
+        input_data_filtered = input_data[self._rf_model.feature_names_in_]
+
+        predictions = self._rf_model.predict(input_data_filtered)
         
         input_data["predicted_spirality"] = predictions
         
