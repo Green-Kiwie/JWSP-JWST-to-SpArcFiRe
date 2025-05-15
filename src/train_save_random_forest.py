@@ -18,6 +18,7 @@ try:
     print(trained_model.summary_msg())
 
     trained_model.save_model(save_file)
+    trained_model.save_label_encoder(save_le)
     del trained_model
 
 except Exception as e:
