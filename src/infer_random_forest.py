@@ -12,7 +12,7 @@ try:
     data_filepath = Path(str(arguments[1]))
     output_filepath = Path(str(arguments[2]))
     model_filepath = Path(str(arguments[3]))
-    le_filepath = Path(str(arguments[3]))
+    le_filepath = Path(str(arguments[4]))
 
     input_data = pd.read_csv(data_filepath)
 
