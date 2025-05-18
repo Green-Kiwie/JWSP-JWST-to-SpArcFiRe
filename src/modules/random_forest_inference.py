@@ -41,3 +41,7 @@ class random_forest_inferer:
         input_data["predicted_spirality"] = predictions
 
         return input_data
+
+    def list_features(self):
+        """Lists all features used in the Random Forest model."""
+        return list(self._rf_model.feature_names_in_)
