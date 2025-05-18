@@ -6,6 +6,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
 from pathlib import Path
+import reading_sparcfire as sparcfire
 
 from typing import Callable
 
@@ -77,12 +78,12 @@ class RandomForestTrainer:
         'for {num of trees} and {num of features} features, training r^2: {accuracy score}, testing r^2: {accuracy score}'"""
         return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data r^2: {self.training_r2():.2f}, testing data r^2: {self.testing_r2():.2f}, training data rmse: {self.training_rmse():.2f}, testing data rmse: {self.testing_rmse():.2f} \n"
     
-    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}):
+    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, filepath: str = "randomforest_training_data/data.csv", split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}):
         self._num_trees = num_trees
         self._num_features = num_features
         self._buckets = split_test_inputs["num_buckets"]
 
-        self._full_dataset = self._load_training_data(split_test_train_function, split_test_inputs)
+        self._full_dataset = self._load_training_data(split_test_train_function, split_test_inputs, filepath=filepath)
         self._transformed_dataset, self._data_transformer = self.transform_data()
 
         self._rf_model = self._train_random_forest(self.train_x(), self.train_y(), num_trees, num_features)
@@ -100,12 +101,19 @@ class RandomForestTrainer:
         rf = RandomForestRegressor(n_estimators=num_tress, random_state=42, max_features=num_features)
         rf.fit(x_train, y_train)
         return rf
+    
+    def _remove_redundant_columns(self, dataset: pd.DataFrame, columns = ["fit_state", "warnings"]) -> pd.DataFrame:
+        """removes certain columns for preprocessing"""
+        return dataset.drop(columns=[col for col in columns if col in dataset.columns])
 
 
     def _load_training_data(self, split_test_train_function: Callable, split_test_train_kwargs: dict, filepath: str = "randomforest_training_data/data.csv") -> pd.DataFrame:
         """reads csv filepath and loads into dataframe object, adds P_spiral value"""
-        dataset = pd.read_csv(filepath)
+        dataset = sparcfire.load_training_data(filepath)
         dataset.columns = [col.strip() for col in dataset.columns]
+
+        dataset = self._remove_redundant_columns(dataset)
+
         dataset = self._get_target(dataset)
         dataset = self._split_training_testing_data(dataset, split_test_train_function, split_test_train_kwargs)
         return dataset
@@ -124,11 +132,12 @@ class RandomForestTrainer:
         categorical_cols = self._get_relevant_training_values().select_dtypes(include=["object", "category"]).columns
         encoded_data = self._get_relevant_training_values()
 
-        le = LabelEncoder()
+        label_encoders = {}
         for col in categorical_cols:
+            le = LabelEncoder()
             encoded_data[col] = le.fit_transform(encoded_data[col])
-
-        return encoded_data, le
+            label_encoders[col] = le
+        return encoded_data, label_encoders
     
     def save_model(self, path: Path) -> None:
         """saves model to a .pkl file"""

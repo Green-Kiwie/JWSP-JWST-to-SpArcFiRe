@@ -1,0 +1,115 @@
+#to remove nans:
+
+(
+  header=$(head -n 1 cleaned_2_bayonet_combined.csv)
+  total=$(wc -l < cleaned_2_bayonet_combined.csv)
+  removed=0
+
+  echo "$header" > cleaned_no_nan_bayonet_combined.csv
+  tail -n +2 cleaned_2_bayonet_combined.csv | awk -F',' '{
+    remove=0
+    for (i=2; i<=20 && i<=NF; i++) {
+      if ($i ~ /^[[:space:]]*$/) {
+        remove=1
+        break
+      }
+    }
+    if (!remove) {
+      print $0 >> "cleaned_no_nan_bayonet_combined.csv"
+    } else {
+      removed++
+    }
+  } END { print removed > "/tmp/lines_removed.tmp" }
+  '
+  echo "$(cat /tmp/lines_removed.tmp) lines removed"
+  rm /tmp/lines_removed.tmp
+)
+
+
+
+#to fix close names:
+awk -F',' -v OFS=',' '
+NR == 1 { print; next }
+
+{
+  if ($4 == "unavailable") $4 = "_"
+  if ($4 == "aggressive-exclusive") $4 = "aggressiveexclusive"
+  if ($5 == "conservative-exclusive") $5 = "conservativeexclusive"
+  if ($5 == "aggressive-exclusive") $5 = "aggressiveexclusive"
+  if ($5 == "unavailable") $5 = "_"
+
+  if ($6 == "Z-wise") $6 = "Zwise"
+  if ($7 == "Z-wise") $7 = "Zwise"
+  if ($8 == "Z-wise") $8 = "Zwise"
+  if ($9 == "Z-wise") $9 = "Zwise"
+  if ($6 == "S-wise") $6 = "Swise"
+  if ($7 == "S-wise") $7 = "Swise"
+  if ($8 == "S-wise") $8 = "Swise"
+  if ($9 == "S-wise") $9 = "Swise"
+
+  if ($62 ~ /<2 arcs/) $62 = "<2_arcs"
+  if ($62 ~ /one-long/) $62 = "onelong"
+  if ($62 ~ /all-short/) $62 = "allshort"
+
+  print
+}
+' cleaned_no_nan_bayonet_combined.csv > mostly_rewritten_bayonet_combined.csv
+
+
+#check what is column 62
+awk -F',' 'NR==1 { print $62 }' cleaned_no_nan_bayonet_combined.csv
+
+
+#replace space with underscores
+
+awk -F',' -v OFS=',' '
+BEGIN {
+  # Columns where we want to replace spaces with underscores
+  target_cols["iptSz"] = 1
+  target_cols["covarFit"] = 1
+  target_cols["chirality_votes_maj"] = 1
+  target_cols["chirality_votes_alenWtd"] = 1
+  target_cols["sorted_agreeing_arclengths"] = 1
+  target_cols["sorted_agreeing_pangs"] = 1
+
+}
+
+NR == 1 {
+  # Capture the column indices based on header names
+  for (i = 1; i <= NF; i++) {
+    colname = $i
+    gsub(/"/, "", colname)
+    if (colname in target_cols) {
+      col_index[colname] = i
+    }
+  }
+  print
+  next
+}
+
+{
+  # Process each column
+  for (i = 1; i <= NF; i++) {
+    found = 0
+    for (col in col_index) {
+      if (i == col_index[col]) {
+        gsub(/ /, "_", $i)
+        found = 1
+        break
+      }
+    }
+    if (!found) {
+      gsub(/;/, "", $i)
+    }
+  }
+  print
+}
+' mostly_rewritten_bayonet_combined.csv > underscores_bayonet.csv
+
+
+#to convert true to true in training dataset
+sed -e 's/\<true\>/True/g' -e 's/\<false\>/False/g' randomforest_training_data/data_cleaned.csv \
+| awk -F',' 'NR == 1 || ($12 !~ /_/ && $31 ~ /^0\.*/)' \
+| awk -F',' -v OFS=',' '{if (NR != 1) {gsub(/_/, " ", $26)} print}' \
+> randomforest_training_data/data_cleaned2.csv
+
