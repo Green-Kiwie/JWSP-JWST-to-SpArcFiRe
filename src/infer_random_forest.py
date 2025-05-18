@@ -14,17 +14,16 @@ try:
     model_filepath = Path(str(arguments[3]))
     le_filepath = Path(str(arguments[4]))
 
-    inferer = rfi.random_forest_inferer(model_filepath, le_filepath)
-    print(inferer.list_features())
+    input_data = pd.read_csv(data_filepath)
 
-    # input_data = pd.read_csv(data_filepath)
+    inferer = rfi.random_forest_inferer(model_filepath, le_filepath, input_data)
+    # print(inferer.list_model_features())
+    # print(inferer.list_data_features())
 
-    # inferer = rfi.random_forest_inferer(model_filepath, le_filepath)
+    result_df = inferer.predict()
 
-    # result_df = inferer.predict(input_data)
-
-    # result_df.to_csv(output_filepath)
-    # print(f"output saved to {output_filepath}")
+    result_df.to_csv(output_filepath)
+    print(f"output saved to {output_filepath}")
 
 except Exception as e:
     print(f"error: {e}")
