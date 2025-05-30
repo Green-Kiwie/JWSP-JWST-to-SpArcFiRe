@@ -55,7 +55,7 @@ def _get_user_filter_requirement() -> bool:
 
 def _filter_i2d_only(uri_list: pd.Series) -> pd.Series:
     '''filter uris to only return uri that end with _i2d.fits'''
-    filter_uri = uri_list[uri_list.str.endswith('_i2d.fits')]
+    filter_uri = uri_list[uri_list.fillna('').astype(str).str.endswith('_i2d.fits')]
     return filter_uri
 
 def _filter_uris(uri_list: pd.Series) -> pd.Series:
@@ -140,7 +140,7 @@ if __name__ == '__main__':
             try:
                 download_filepath = _download_uri(uri)
                 sep_run = _run_sep(download_filepath, output_filepath, records_class)
-                file_remove = _remove_fits(download_filepath)
+                # file_remove = _remove_fits(download_filepath)
                 
                 count += 1
                 print(f"SEP run on {count}/{total} files")
