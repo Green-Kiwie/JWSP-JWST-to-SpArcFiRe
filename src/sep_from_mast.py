@@ -69,6 +69,8 @@ def _filter_uris(uri_list: pd.Series) -> pd.Series:
 def _download_uri(uri: str) -> tuple[str, bool]:
     '''downloads uri from mast database. returns true if successfully download. else, return false'''
     filepath = 'output/' + uri[17:]
+    if (os.path.exists(filepath)):
+        return filepath
     mi.download_file(uri, filepath)
     return filepath
 
@@ -121,7 +123,6 @@ def _log_errored_download(filename_prefix: str, uri: str, error: str) -> None:
     filepath = f"{filename_prefix}_log.txt"
     with open(filepath, 'a') as file:
         file.write(f"unable to download {uri}, {error} \n")
-
 
 if __name__ == '__main__':
     filepath = _get_filepath()
