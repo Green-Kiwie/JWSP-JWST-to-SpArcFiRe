@@ -1,4 +1,11 @@
-'''script takes a csv file, gets all mast uri from the file and downloads each file and runs sep on it'''
+'''
+The script: 
+    1. Takes a .csv file from MAST
+    2. Downloads each .fits file from the URI in the .csv file
+    3. Runs SEP on each .fits file
+    4. Saves each cropped object from SEP into a specified output directory
+
+'''
 
 import sys
 

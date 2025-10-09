@@ -36,10 +36,10 @@ For access to dataset and models, please contact kierannc@uci.edu
     Trains one particular model given a certain hyperparameter and saves the label encoder together with the random forest model. There are 4 parameters to add in the command line when running the script. Template for running script: 
         ```python train_save_random_forest.py [num trees] [num featurs] [file for model to save to (must be .pkl file)] [file to save label encoder to (must be .pkl file)]```.
  
-7. ```infer_random_forest```: Still under development. Given a dataset, uses a given random forest and label encoder model to determine probabilty of spirality based on sparcfire inputs. 
+7. ```infer_random_forest```: Still under development. Given a dataset, uses a given random forest and label encoder model to determine probabilty of spirality based on SpArcFiRe inputs. 
 
 
-***SpArcFiRe is run externally. Refer to sparcfire repository on how to run with it. This repository does not supply code to run sparcfire.***
+***SpArcFiRe is run externally. Refer to [SpArcFiRe repository](https://github.com/waynebhayes/SpArcFiRe) on how to run with it. This repository does not supply code to run SpArcFiRe.***
 
 
 ## Known Errors:
