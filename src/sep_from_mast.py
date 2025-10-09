@@ -12,8 +12,8 @@ import file_handling_class as fhc
 import pathlib
 import pandas as pd
 import numpy as np
-import shutil 
 import os
+from astropy.io import fits
 
 _MIN_SIZE = 15 #minimum size of object before object is cropped
 _MAX_SIZE = 100
@@ -74,6 +74,10 @@ def _download_uri(uri: str) -> tuple[str, bool]:
     mi.download_file(uri, filepath)
     return filepath
 
+def _load_uri_to_memory(uri: str) -> fits.HDUList:
+    '''loads FITS file from MAST URI into in-memory HDUList Object'''
+    return mi.get_fits_from_uri(uri)
+
 def _remove_fits(download_filepath: str) -> None:
     '''removes the downloaded fits path'''
     os.remove(download_filepath)
@@ -102,21 +106,23 @@ def _get_thumbprints(output_dir: str, original_image_name: str, image_data: np.n
                                verbosity = verbosity, records_class = records_object)
     
 
-def _run_sep(download_filepath: str, output_filepath: str, records_object: fhc.Thumbnail_Handling) -> bool:
+def _run_sep(hdul: fits.HDUList, uri: str, output_filepath: str, records_object: fhc.Thumbnail_Handling) -> None:
     '''runs sep on filepath and return bool value for success'''
-    image_data = sh.get_main_fits_data(download_filepath)
-    
+    try:
+        image_data = sh.get_main_fits_data(hdul)
+        image_meta_data = sh.get_relevant_fits_meta_data(hdul)
 
-    background_rms = sh.get_image_background(image_data)
-    backgroundless_data = sh.subtract_bkg(image_data)
-    celestial_objects = sh.extract_objects(backgroundless_data, background_rms)
-    # scaled_image = sh.scale_fits_data(backgroundless_data)
+        # perform SEP operations
+        background_rms = sh.get_image_background(image_data)
+        backgroundless_data = sh.subtract_bkg(image_data)
+        celestial_objects = sh.extract_objects(backgroundless_data, background_rms)
 
-    image_meta_data = sh.get_relevant_fits_meta_data(download_filepath)
-
-    original_image_name = pathlib.Path(download_filepath).name
-    _get_thumbprints(output_filepath, original_image_name, backgroundless_data, 
-                     image_meta_data, celestial_objects, records_object)
+        # save thumbnail images
+        original_image_name = uri[17:]
+        _get_thumbprints(output_filepath, original_image_name, image_data, image_meta_data, celestial_objects, records_object)
+    finally:
+        if hdul:
+            hdul.close()
 
 def _log_errored_download(filename_prefix: str, uri: str, error: str) -> None:
     '''writes to a file a particular file that was unable to download'''
@@ -132,30 +138,36 @@ if __name__ == '__main__':
     count = 0
     total = len(uris)
     output_filepath = 'output/objects_from_mast_csv/'
+
+    # Create directories for output and logs
+    _create_directory('output/')
     _create_directory(output_filepath)
 
     records_class = fhc.Thumbnail_Handling(sh.save_to_fits, output_filepath)
     
     for uri in uris:
-        for _ in range(5):
+        error = "Unknown error"
+        for _ in range(5): # Retry loop
             try:
-                download_filepath = _download_uri(uri)
-                sep_run = _run_sep(download_filepath, output_filepath, records_class)
-                # file_remove = _remove_fits(download_filepath)
+                # Load FITS data directly into memory
+                hdul = _load_uri_to_memory(uri)
+                if hdul is None:
+                    raise ConnectionError("Failed to load HDUList from MAST.")
+                
+                # Process the in-memory data
+                _run_sep(hdul, uri, output_filepath, records_class)
                 
                 count += 1
                 print(f"SEP run on {count}/{total} files")
-                break
+                break # Success, exit retry loop
             except Exception as e:
-                print(f"error: {e}")
+                print(f"An error occurred: {e}")
                 error = e
+                # 'pass' will allow the loop to retry
                 pass
-        else:
-            _log_errored_download("output/mast_csv_error", uri, error)
+        else: # This runs if the retry loop finishes without a 'break'
+            _log_errored_download("output/mast_csv_error", uri, str(error))
             count += 1
-            print("File unable to download, error logged.")
-        
+            print("File unable to be processed, error logged.")
 
-    print(f'sep run successfully on {len(uris)} files')
-
-
+    print(f'SEP run successfully on {count}/{total} files')

@@ -6,3 +6,4 @@ lib/
 share/
 src/__pycache__/
 src/modules/__pycache__/
+myenv/

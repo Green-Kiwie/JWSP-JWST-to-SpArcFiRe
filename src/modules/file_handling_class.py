@@ -1,19 +1,21 @@
 import sep_helpers as sh
 import position_resolving as resolve
+from astropy.io import fits
 
 import numpy as np
 import pathlib
 import math
 
-def _get_pos_of_file(filepath: str) -> tuple[float, float]:
-    meta_data = sh.get_all_fits_meta_data(filepath)
+def _get_pos_of_file(filepath: str) -> 'Gal_Pos':
+    """opens a FITS file and returns a Gal_Pos object with its metadata"""
+    with fits.open(filepath) as hdul:
+        meta_data = sh.get_all_fits_meta_data(hdul)
 
     gal_pos = Gal_Pos(meta_data)
-    # print(f'object: {meta_data['OBJ_RA']}, {meta_data['OBJ_DEC']}')
     return gal_pos
 
 class Gal_Pos:
-    def __init__(self, image_meta_data: np.ndarray):
+    def __init__(self, image_meta_data: dict):
         pixel_size = image_meta_data['PIXAR_A2'][0]
         pixel_width = math.sqrt(pixel_size)
         ori_pos_x = image_meta_data['SUBSIZE1'][0]/2

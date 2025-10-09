@@ -1,4 +1,8 @@
-'''this script runs SEP on one fits file.'''
+''' 
+This script runs SEP on one fits file.
+
+Takes a fits file as input, finds celestial objects, and saves cropped images (thumbprints) to files.
+'''
 
 import sys
 
@@ -82,15 +86,12 @@ def _get_thumbprints(output_filepath: str, image_data: np.ndarray, image_meta_da
 def run():
     file_name = _get_file_name()
 
-    image_data = sh.get_main_fits_data(file_name)
-    
-
-    background_rms = sh.get_image_background(image_data)
-    backgroundless_data = sh.subtract_bkg(image_data)
-    celestial_objects = sh.extract_objects(backgroundless_data, background_rms)
-    scaled_image = sh.scale_fits_data(backgroundless_data)
-
-    image_meta_data = sh.get_relevant_fits_meta_data(file_name)
+    image_data = sh.get_main_fits_data(file_name)                                   # Loads image data from fits file
+    background_rms = sh.get_image_background(image_data)                            # Calculates background noise           
+    backgroundless_data = sh.subtract_bkg(image_data)                               # Subtracts background noise from image data
+    celestial_objects = sh.extract_objects(backgroundless_data, background_rms)     # Extracts celestial objects from image data
+    scaled_image = sh.scale_fits_data(backgroundless_data)                          # Adjusts image data for better viewing
+    image_meta_data = sh.get_relevant_fits_meta_data(file_name)                     # Gets relevant meta data from fits file
 
     _print_image([scaled_image], sh.show_fits_image, 'scaled')
     _print_image([background_rms], sh.show_fits_image, 'background')

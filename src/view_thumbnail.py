@@ -1,5 +1,12 @@
-'''this script allows to view one scaled thumbnail, 
-provides relevant meta data in print'''
+'''
+
+Script to view thumbnail fits image(s) and print all associated metadata.
+
+Example input: 
+    FOR SINGLE FILE:    'sample_data/image3/object_2.fits'
+    FOR DIRECTORY:      'sample_data/image3/'
+    
+'''
 
 import sys
 
@@ -87,12 +94,14 @@ def _print_one_file(filename: str) -> None:
 def run() -> None:
     file_name, file_type = _get_file_name()
 
+    # Process directory
     if file_type == 'dir':
         directory = pathlib.Path(file_name)
         for fits_file in directory.iterdir():
             if str(fits_file).endswith('fits'):
                 _print_one_file(fits_file)
 
+    # Process single file
     elif file_type == 'fits':
         _print_one_file(file_name)
 
