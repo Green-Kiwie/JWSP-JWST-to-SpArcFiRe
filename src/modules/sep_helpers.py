@@ -18,49 +18,83 @@ def _fill_nan(image_data: np.ndarray) -> np.ndarray:
     
     return convolved_data
 
-def get_main_fits_data(hdul: fits.HDUList) -> np.ndarray:
-    '''reads 'sci' data from in-memory HDUList object'''
+def get_main_fits_data(filepath: str) -> np.ndarray:
+    '''opens fits file and returns the 'sci' data '''
+    hdul = fits.open(filepath)
+
     try:
         image_data = hdul['SCI'].data
-    except KeyError:
+    except:
         image_data = hdul[0].data
-    
+
     image_data_no_nan = _fill_nan(image_data)
     byte_swapped_data = image_data_no_nan.byteswap().view(image_data_no_nan.dtype.newbyteorder('='))
+    hdul.close()
     return byte_swapped_data
 
-def get_all_fits_meta_data(hdul: fits.HDUList) -> dict[tuple[any, any]]:
-    '''gets all meta data from an HDUList object.'''
+def get_all_fits_meta_data(filepath: str) -> dict[tuple[any, any]]:
+    '''gets all meta data of file, 
+    comments and values themselves combined into a dictionary'''
+    hdul = fits.open(filepath)
+
     try:
         primary_data = hdul['PRIMARY'].header
         primary_data_comments = hdul['PRIMARY'].header.comments
-    except KeyError:
+    except:
         primary_data = hdul[0].header
         primary_data_comments = hdul[0].header.comments
 
-    output = {key: (primary_data[key], primary_data_comments[key]) for key in primary_data.keys()}
+    hdul.close()
+
+    output = dict()
+    for key in primary_data.keys():
+        output[key] = (primary_data[key], primary_data_comments[key])
+
     return output
 
-def get_relevant_fits_meta_data(hdul: fits.HDUList) -> dict:
-    '''gets relevant meta data from an HDUList object for later calculations'''
-    relevant_meta_data = {}
+
+def get_relevant_fits_meta_data(filepath: str) -> dict:
+    '''
+    gets relevant meta data to calculating meta data for extracted objects.
+    data returned as a dict
+    Note: might need to account for offset caused by dither'''
+    hdul = fits.open(filepath)
+
+    relevant_meta_data = dict()
+
+    try:
+        primary_data = hdul['PRIMARY'].header
+    except KeyError:
+        primary_data = hdul[0].header
+
+    description_data = primary_data.comments
+    for key in primary_data.keys():
+        relevant_meta_data[key] = (primary_data[key], description_data[key])
+
+    # meta_data_list = [('DATE-BEG', 'DATE-BEG', 'Begin datetime of the exposure'),
+    #  ('DATE-END', 'DATE-END', 'END datetime of the exposure'),
+    #  ('OBS_ID', 'OBS_ID', 'Observation ID'),
+    #  ('ORI_RA', 'TARG_RA', 'RA Position of original image'),
+    #  ('ORI_DEC', 'TARG_DEC', 'DEC Position of original image'),
+    #  ('EFFEXPTM', 'EFFEXPTM','Effective exposure time of image in second'),
+    #  ('ORIAXIS1', 'SUBSIZE1', 'number of pixels in original image axis 1'),
+    #  ('ORIAXIS2', 'SUBSIZE2', 'number of pixels in original image axis 2')
+    # ]
+    # for new_key, key, description in meta_data_list:
+    #     relevant_meta_data[new_key] = (primary_data[key], description)
     
     try:
-        primary_header = hdul['PRIMARY'].header
+        image_data_header = hdul['SCI'].header
     except KeyError:
-        primary_header = hdul[0].header
+        image_data_header = hdul[0].header
 
-    for key in primary_header.keys():
-        relevant_meta_data[key] = (primary_header[key], primary_header.comments[key])
+    description_data2 = image_data_header.comments
+    for key in image_data_header.keys():
+        relevant_meta_data[key] = (image_data_header[key], description_data2[key])
 
-    try:
-        sci_header = hdul['SCI'].header
-        for key in sci_header.keys():
-            relevant_meta_data[key] = (sci_header[key], sci_header.comments[key])
-    except KeyError:
-        # If 'SCI' extension doesn't exist, we've likely already read all necessary headers
-        pass
+    hdul.close()
 
+    # print(relevant_meta_data)
     return relevant_meta_data
     
 def scale_fits_data(image_data: np.ndarray) -> np.ndarray:
@@ -244,15 +278,13 @@ def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_
       
         if type(cropped_data) != type(None):
 
-            base_filename = file_name + f"object_{i + 1}.fits"
-            
-            # This is the fix: Remove any leading slashes to ensure a relative path
-            curr_file_name = base_filename.lstrip('/\\')
-
-            # Now the path will be joined correctly
+            curr_file_name = file_name + f"object_{i + 1}.fits"
             file_address = os.path.join(output_dir, curr_file_name)
 
             image_meta_data = _update_meta_data(obj, cropped_data, image_meta_data)
             records_class.save_file_include_duplicate((file_address, cropped_data, image_meta_data), image_meta_data, curr_file_name)
+
+            total_files = records_class.get_total_files()
+
 
     print(f"total files cropped: {total_files}")
