@@ -1,8 +1,12 @@
 import numpy as np
-import sep_pjw as sep
-import matplotlib.pyplot as plt
+from pathlib import Path
 import os
 import math
+
+from skimage.transform import resize
+import matplotlib.pyplot as plt
+
+import sep_pjw as sep
 
 from astropy.io import fits
 from astropy.convolution import Gaussian2DKernel, interpolate_replace_nans
@@ -101,6 +105,13 @@ def scale_fits_data(image_data: np.ndarray) -> np.ndarray:
     '''scales the image using the asinh function'''
     arcsin_data = np.arcsinh(image_data)
     return arcsin_data
+
+def save_fits_as_png(image_data: np.ndarray, save_directory: Path, png_dimension: int = 512) -> None:
+    """scales image and save as a png"""
+    scaled_data = scale_fits_data(image_data)
+    scaled_data = np.nan_to_num(scaled_data, nan=0.0, posinf=0.0, neginf=0.0)
+    resized_data = resize(scaled_data, (png_dimension, png_dimension), order=0, preserve_range=True, anti_aliasing=False)
+    plt.imsave(save_directory, resized_data, cmap='gray', origin='lower')
 
 def show_fits_image(image_data: np.ndarray, title = 'FITS Image') -> None:
     '''prints the image data using matplotlib'''
