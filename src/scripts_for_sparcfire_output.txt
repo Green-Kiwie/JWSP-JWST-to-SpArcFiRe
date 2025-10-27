@@ -113,3 +113,30 @@ sed -e 's/\<true\>/True/g' -e 's/\<false\>/False/g' randomforest_training_data/d
 | awk -F',' -v OFS=',' '{if (NR != 1) {gsub(/_/, " ", $26)} print}' \
 > randomforest_training_data/data_cleaned2.csv
 
+awk -F',' 'NR==1 || (!/,,/)' randomforest_training_data/data_cleaned2.csv \
+> randomforest_training_data/data_cleaned3.csv
+
+awk -F',' 'BEGIN{OFS=","} 
+NR==1 {print; next} 
+!/,,/ {
+    for (i=1; i<=NF; i++) {
+        if ($i == "-Inf") $i="NaN"
+    }
+    print
+}' randomforest_training_data/data_cleaned3.csv > randomforest_training_data/data_cleaned4.csv
+
+#to match inferring with training data_cleaned
+awk -F',' 'NR==1 || (!/NaN/ && $11 !~ /i/)' bayonet_sparcfire_output/mostly_rewritten_bayonet_combined.csv \
+> bayonet_sparcfire_output/final_bayonet_data.csv
+
+
+sed -e 's/\<true\>/True/g' \
+    -e 's/\<false\>/False/g' \
+    -e "s/<2_arcs/'<2_arcs'/g" \
+    -e "s/allshort/'allshort'/g" \
+    -e "s/onelong/'onelong'/g" \
+    bayonet_sparcfire_output/final_bayonet_data.csv \
+> bayonet_sparcfire_output/final_bayonet_data2.csv
+
+grep -v ",_," bayonet_sparcfire_output/final_bayonet_data2.csv > bayonet_sparcfire_output/final_bayonet_data3.csv
+grep -v ",-Inf," bayonet_sparcfire_output/final_bayonet_data3.csv | grep -v ",Inf"  > bayonet_sparcfire_output/final_bayonet_data4.csv
