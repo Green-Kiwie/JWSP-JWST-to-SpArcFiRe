@@ -2,6 +2,8 @@ import pandas as pd
 import joblib
 from pathlib import Path
 
+import numpy as np
+
 class random_forest_inferer:
     def __init__(self, model_path: Path, le_path: Path, data: pd.DataFrame):
         if not model_path.exists():
@@ -70,6 +72,10 @@ class random_forest_inferer:
 
         for col, encoder in self._le_model.items():
             input_data_filtered[col] = encoder.transform(input_data_filtered[col])
+
+        # for col in input_data_filtered.columns:
+        #     if (input_data_filtered[col].isin([np.inf, -np.inf]).any()):
+        #         print(f"data is np.inf or -np.inf in column {col}")
         
         predictions = self._rf_model.predict(input_data_filtered)
         input_data["predicted_spirality"] = predictions

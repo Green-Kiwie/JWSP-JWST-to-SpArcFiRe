@@ -129,7 +129,7 @@ class RandomForestTrainer:
     
     def transform_data(self) -> tuple[pd.DataFrame, LabelEncoder]:
         """scales featureset with label encoders. Returns a dataframe of scaled featuresets"""
-        categorical_cols = self._get_relevant_training_values().select_dtypes(include=["object", "category"]).columns
+        categorical_cols = self._get_relevant_training_values().select_dtypes(include=["object", "category", "string"]).columns
         encoded_data = self._get_relevant_training_values()
 
         label_encoders = {}
