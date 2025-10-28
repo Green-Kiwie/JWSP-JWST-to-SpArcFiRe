@@ -14,6 +14,7 @@ import glob
 import numpy as np
 import sep_pjw as sep
 import sep_helpers as sh
+import file_handling_class as fhc
 from typing import List
 
 def validate_fits_file(filepath: str) -> bool:
@@ -48,8 +49,13 @@ def get_fits_files(input_path: str) -> List[str]:
         raise ValueError(f"Invalid input path: {input_path}")
 
 
-def process_fits_file(filepath: str, output_dir: str) -> bool:
-    '''Process single FITS file with SEP and save cropped objects.'''
+def process_fits_file(filepath: str, records_class: fhc.Thumbnail_Handling, min_size: int=15, max_size: int=100) -> bool:
+    '''Process single FITS file with SEP and stage cropped objects in records.
+       min_size: minimum size of object to be cropped
+       max_size: maximum size of object to be cropped
+    
+       Returns True if processing was successful, False otherwise.
+    '''
     try:    
         image_data = sh.get_main_fits_data(filepath)                # np.ndarray
         image_meta_data = sh.get_relevant_fits_meta_data(filepath)  # dict
@@ -73,13 +79,19 @@ def process_fits_file(filepath: str, output_dir: str) -> bool:
             image_meta_data=image_meta_data,
             file_name=os.path.basename(filepath),
             celestial_objects=celestial_objects,
-            output_dir=output_dir
+            output_dir='', # not used since we use records_class
+            min_size=min_size,
+            max_size=max_size,
+            verbosity=0,
+            records_class=records_class
         )
         
         return True
         
     except Exception as e:
         print(f"ERROR processing {filepath}: {str(e)}")
+        import trackback
+        traceback.print_exc()
         return False
 
 
@@ -94,6 +106,9 @@ Examples:
   
   # Directory
   python sep_from_local.py --directory /path/to/fits/
+
+  # Combined
+  python sep_from_local.py --directory /path/to/fits/ --output /path/to/output/
         """
     )
     
@@ -124,26 +139,39 @@ Examples:
         fits_files = get_fits_files(input_path)
         output_dir = os.path.abspath(args.output)
         os.makedirs(output_dir, exist_ok=True)
-        
+
+        print(f"Output directory: {output_dir}")
+
         successful = 0
         failed = 0
         
+        records_class = fhc.Thumbnail_Handling(sh.save_to_fits) 
+
+        print(f"Found {len(fits_files)} FITS files to process.")
+        print(f"{'='*70}")
+
         for i, filepath in enumerate(fits_files, 1):
             if len(fits_files) > 1:
                 print(f"\n[{i}/{len(fits_files)}]", end=' ')
-            
-            if process_fits_file(filepath, output_dir, fits_files):
+
+            if process_fits_file(filepath, records_class, min_size=40, max_size=100):
                 successful += 1
             else:
                 failed += 1
+
+            # ! PRINT MEMORY USAGE
+            #records_class.print_memory_report(file_count=len(fits_files), processed_files=i)
         
+        # finalize all staged crops to disk
+        total_saved = records_class._finalize_and_save(output_dir)
+
         print(f"\n{'='*70}")
         print("PROCESSING COMPLETE")
         print(f"{'='*70}")
-        print(f"Total files:      {len(fits_files)}")
-        print(f"Successful:       {successful}")
-        print(f"Failed:           {failed}")
-        print(f"Output directory: {output_dir}")
+        print(f"Total files saved:  {total_saved}")
+        print(f"Successful .fits:   {successful}")
+        print(f"Failed .fits:       {failed}")
+        print(f"Output directory:   {output_dir}")
         print(f"{'='*70}")
         
         if failed > 0:
@@ -157,6 +185,8 @@ Examples:
         sys.exit(1)
     except Exception as e:
         print(f"ERROR: Unexpected error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 

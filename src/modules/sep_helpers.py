@@ -361,6 +361,28 @@ def _update_meta_data(obj_data: np.ndarray, image_data: np.ndarray, current_meta
 
     return new_meta_data
 
+def standardize_crop_dimensions(crop_data: np.ndarray, target_height: int, target_width: int) -> np.ndarray:
+    '''standardize crop dimensions to target size by padding with NaN or truncating'''
+    current_height, current_width = crop_data.shape
+
+    # do nothing
+    if current_height == target_height and current_width == target_width:
+        return crop_data
+    
+    # expand
+    if current_height < target_height and current_width < target_width:
+        result = np.full((target_height, target_width), np.nan, dtype=crop_data.dtype)
+        y_offset = (target_height - current_height) // 2
+        x_offset = (target_width - current_width) // 2
+
+        result[y_offset:y_offset + current_height, x_offset:x_offset + current_width] = crop_data
+        return result
+
+    # truncate (from center)
+    y_start = (current_height - target_height) // 2
+    x_start = (current_width - target_width) // 2
+    result = crop_data[y_start:y_start + target_height, x_start:x_start + target_width]
+    return result
 
 def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_name: str, celestial_objects: np.ndarray, 
                             output_dir: str, padding: float = 1.5, min_size: int = 20, max_size: int = 100,
@@ -389,16 +411,19 @@ def extract_objects_to_file(image_data: np.ndarray, image_meta_data: dict, file_
             # update metadata with source filename
             updated_meta_data = _update_meta_data(obj, cropped_data, image_meta_data, source_filename=file_name)
             
-            # generate coordinate-based filename with version
+            # create Gal_Pos object for this galaxy
             gal_pos = fhc.Gal_Pos(updated_meta_data)
-            coord_filename, version = records_class.get_galaxy_filepath(gal_pos, output_dir)
+
+            # create temp file name for tracking
+            ra, dec = gal_pos.get_pos()
+            temp_filename = f"temp_{i}.fits"
             
-            # save using the new naming convention and file
-            records_class.save_file_include_duplicate((coord_filename, cropped_data, updated_meta_data), 
-                                                      updated_meta_data, coord_filename)
+            # add crop to group (staging, but not saving)
+            records_class._add_crop_to_group(gal_pos, cropped_data, updated_meta_data, temp_filename)
 
             total_files = records_class.get_total_files()
             if verbosity > 0:
-                print(f"Saved object {i+1} as version {version} to {os.path.basename(coord_filename)}")
+                print(f"Staged object {i+1} for group at RA={ra:.4f}, DEC={dec:.4f}.")
 
     print(f"total files cropped: {total_files}")
+

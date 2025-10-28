@@ -83,20 +83,20 @@ class Thumbnail_Handling:
             self._add_files_to_record(filepath)
 
     def _add_files_to_record(self, filepath: str) -> None:
-        """Scan existing FITS in a directory and register them as records.
+        '''Scan existing FITS in a directory and register them as records.
 
         Existing files are grouped by approximate position and size so that
         multiple versions (different filters) can be associated together.
-        """
+        '''
         directory = pathlib.Path(filepath)
         for fits_file in directory.iterdir():
             if str(fits_file).endswith('fits'):
                 gal_pos= _get_pos_of_file(fits_file)
                 key = self._find_key_for(gal_pos)
                 if key is None:
-                    self._records[gal_pos] = [gal_pos]
+                    self._records[gal_pos] = {'members': [gal_pos], 'crops': [], 'max_dims': (0,0)}
                 else:
-                    self._records[key].append(gal_pos)
+                    self._records[key]['members'].append(gal_pos)
 
         total = sum(len(v) for v in self._records.values())
         print(f"{total} images exists. All are added to record object")
@@ -109,10 +109,10 @@ class Thumbnail_Handling:
         return True
 
     def _find_key_for(self, gal_pos: Gal_Pos, pos_tol_arcsec: float = 1.0, size_tol_frac: float = 0.5) -> Gal_Pos | None:
-        """Find an existing record key that matches gal_pos by position and size.
+        '''Find an existing record key that matches gal_pos by position and size.
 
         Returns the matching key Gal_Pos if found, otherwise None.
-        """
+        '''
         pos = gal_pos.get_pos()
         size = gal_pos.approx_size()
         for key in self._records.keys():
@@ -127,70 +127,71 @@ class Thumbnail_Handling:
                     return key
         return None
 
-    def _add_record_ignore_duplicate(self, gal_pos: Gal_Pos) -> bool:
-        '''if position does not exist, add record to self. 
-        if position is added, return true. else, return false'''
+    def _add_crop_to_group(self, gal_pos: Gal_Pos, crop_data: np.ndarray, metadata: dict, filename: str) -> None:
+        '''adds cropped object to its group, creating if necessary'''
         key = self._find_key_for(gal_pos)
         if key is None:
-            self._records[gal_pos] = [gal_pos]
-            return True
+            self._records[gal_pos] = {'members': [gal_pos], 'crops': [], 'max_dims': (0,0)}
+            key = gal_pos
         else:
-            self._records[key].append(gal_pos)
-            return False
+            self._records[key]['members'].append(gal_pos)
         
-    def _add_record_include_duplicate(self, gal_pos: Gal_Pos) -> bool:
-        '''Always keep the record, grouping by position/size.'''
-        key = self._find_key_for(gal_pos)
-        if key is None:
-            self._records[gal_pos] = [gal_pos]
-        else:
-            self._records[key].append(gal_pos)
-        return True
+        self._records[key]['crops'].append((crop_data, metadata, filename))
+        curHeight, curWidth = crop_data.shape
+        maxHeight, maxWidth = self._records[key]['max_dims']
+        self._records[key]['max_dims'] = (max(curHeight, maxHeight), max(curWidth, maxWidth))
 
+    def _standardize_group(self, key: Gal_Pos) -> list:
+        '''crop all images in a group to the same size. current implementation is the maximum size'''
+        group = self._records[key]
+        maxHeight, maxWidth = group['max_dims']
+        standardized_crops = []
 
-    def save_file_ignore_duplicate(self, save_function_parameters: tuple[any], image_meta_data: np.ndarray, filename: str) -> None:
-        '''if position does not exist, save file. else, still save but record as additional version'''
-        gal_pos = Gal_Pos(image_meta_data)
+        for version_num, (crop_data, metadata, filename) in enumerate(group['crops'], start=1):
+            std_crop = sh.standardize_crop_dimensions(crop_data, maxHeight, maxWidth)
+            standardized_crops.append((std_crop, metadata, version_num))
 
-        added = self._add_record_ignore_duplicate(gal_pos)
-        # always save the file but inform if it was an existing object
-        if not added:
-            print(f"object {filename} corresponds to an existing object; saved as additional version")
-        self._saving_function(*save_function_parameters)
+        return standardized_crops
 
-    def save_file_include_duplicate(self, save_function_parameters: tuple[any], image_meta_data: np.ndarray, filename: str) -> None:
-        '''Save a file and record it grouped by position/size so multiple versions are retained.'''
-        gal_pos = Gal_Pos(image_meta_data)
-        self._add_record_include_duplicate(gal_pos)
-        self._saving_function(*save_function_parameters)
+    def _finalize_and_save(self, output_dir: str) -> int:
+        '''standardize all groups and save to files'''
+        total_saved = 0
+
+        for key in self._records.keys():
+            standardized_crops = self._standardize_group(key)
+
+            # prepare to save to disk
+            for std_crop, metadata, version_num in standardized_crops:
+                ra, dec = key.get_pos()
+                coord_prefix = gn.coords_to_filename_prefix(ra, dec)
+                final_filename = f"{coord_prefix}_v{version_num}.fits"
+                filepath = pathlib.Path(output_dir) / final_filename
+
+                self._saving_function(str(filepath), std_crop, metadata)
+                total_saved += 1
+                print(f"Saved: {final_filename} (v{version_num})")
+        return total_saved
 
     def get_total_files(self) -> int:
         '''returns the total number of files saved'''
         return sum(len(v) for v in self._records.values())
 
     def get_galaxy_filename(self, gal_pos: Gal_Pos, output_dir: str) -> tuple[str, int]:
-        """Generate a coordinate-based filename for a galaxy."""
+        '''Generate a coordinate-based filename for a galaxy.'''
         ra, dec = gal_pos.get_pos()
         filename, version = gn.generate_galaxy_filename(ra, dec, output_dir, return_full_path=False)
         return filename, version
 
     def get_galaxy_filepath(self, gal_pos: Gal_Pos, output_dir: str) -> tuple[str, int]:
-        """Generate a full coordinate-based filepath for a galaxy.
-        
-        Parameters
-        ----------
-        gal_pos : Gal_Pos
-            Galaxy position object with RA/DEC coordinates.
-        output_dir : str
-            Directory where galaxy files are stored.
-        
-        Returns
-        -------
-        tuple[str, int]
-            (full_filepath, version_number) - complete path ready for saving
-        """
+        '''Generate a full coordinate-based filepath for a galaxy.'''
         ra, dec = gal_pos.get_pos()
         filepath, version = gn.generate_galaxy_filename(ra, dec, output_dir, return_full_path=True)
         return filepath, version
 
-
+    def get_memory_stats(self) -> dict:
+        import memory_usage as mt
+        mt.get_records_class_memory(self)
+    
+    def print_memory_report(self, file_count: int = None, processed_files: int = None) -> None:
+        import memory_usage as mt
+        mt.print_memory_report(self, file_count, processed_files)
