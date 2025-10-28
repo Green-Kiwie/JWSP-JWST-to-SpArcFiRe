@@ -1,6 +1,8 @@
 src/main_data/
 src/test_data/
 src/output/
+src/sep_output/
+src/outputTest/
 bin/
 lib/
 share/
