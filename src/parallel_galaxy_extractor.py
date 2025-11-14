@@ -165,12 +165,14 @@ class ProcessingStats:
 
 def process_single_fits(
     filepath: str,
-    db: CoordinateDatabase,
     output_dir: str,
-    min_size: int = 15,
+    db: CoordinateDatabase,
+    min_size: int = 20,
     max_size: int = 100,
     verbosity: int = 1,
-    mode: str = 'full'
+    mode: str = 'full',
+    visualize_crops: bool = False,
+    viz_output_dir: Optional[str] = None
 ) -> Tuple[int, int]:
     '''Process a single FITS file.
     
@@ -182,6 +184,8 @@ def process_single_fits(
         max_size: Maximum crop size in pixels
         verbosity: Verbosity level (0=quiet, 1=normal, 2=verbose)
         mode: Processing mode ('full'=scan+crop, 'scan-only'=db only, 'crop-only'=use existing db)
+        visualize_crops: Whether to generate visualization PNG
+        viz_output_dir: Directory for visualization PNG files
     
     Returns:
         Tuple of (file_size, galaxies_extracted)
@@ -189,6 +193,7 @@ def process_single_fits(
     from galaxy_naming import round_coordinate
     import sep_helpers as sh
     from waveband_extraction import extract_waveband_from_filename
+    from visualization import create_visualization
     
     try:
         filename = os.path.basename(filepath)
@@ -218,6 +223,9 @@ def process_single_fits(
         # Track positions already processed in this file (for deduplication)
         # Key: (ra_rounded, dec_rounded), Value: (crop_size, object_index)
         processed_positions = {}
+        
+        # Track galaxy detections for visualization
+        galaxy_detections_for_viz = []
         
         # Process each detected object
         for i, obj in enumerate(celestial_objects):
@@ -308,6 +316,37 @@ def process_single_fits(
             
             if verbosity >= 2:
                 print(f"  Saved: {output_filename} (group {group_id}, v{version})")
+            
+            # Track for visualization
+            if visualize_crops and viz_output_dir:
+                galaxy_detections_for_viz.append((
+                    obj['x'],
+                    obj['y'],
+                    width,
+                    height
+                ))
+        
+        # Generate visualization if requested
+        if visualize_crops and viz_output_dir and galaxy_detections_for_viz:
+            viz_output_dir_path = Path(viz_output_dir)
+            viz_output_dir_path.mkdir(parents=True, exist_ok=True)
+            
+            # Generate PNG filename based on input FITS filename
+            base_name = os.path.splitext(filename)[0]
+            viz_filename = f"{base_name}_galaxies.png"
+            viz_path = os.path.join(viz_output_dir, viz_filename)
+            
+            success = create_visualization(
+                image_data,
+                galaxy_detections_for_viz,
+                viz_path,
+                max_dimension=2048,
+                circle_color=(0, 255, 0),
+                circle_width=2
+            )
+            
+            if success and verbosity >= 1:
+                print(f"  Visualization saved: {viz_filename}")
         
         if verbosity >= 1:
             msg = f"[Worker] Completed {filename} ({galaxies_saved} galaxies"
@@ -335,7 +374,9 @@ def worker_process(
     min_size: int = 15,
     max_size: int = 100,
     verbosity: int = 1,
-    mode: str = 'full'
+    mode: str = 'full',
+    visualize_crops: bool = False,
+    viz_output_dir: Optional[str] = None
 ):
     '''Main worker process loop.'''
     
@@ -365,10 +406,15 @@ def worker_process(
         # Process file
         start_time = time.time()
         bytes_read, galaxies = process_single_fits(
-            filepath, db, output_dir, 
-            min_size=min_size, max_size=max_size, 
+            filepath, 
+            output_dir,
+            db, 
+            min_size=min_size, 
+            max_size=max_size, 
             verbosity=verbosity,
-            mode=mode
+            mode=mode,
+            visualize_crops=visualize_crops,
+            viz_output_dir=viz_output_dir
         )
         elapsed = time.time() - start_time
         
@@ -415,6 +461,8 @@ def main():
                         help='Verbosity level: 0=quiet, 1=normal, 2=verbose (default: 1)')
     parser.add_argument('--mode', type=str, default='full', choices=['full', 'scan-only', 'crop-only'],
                         help='Processing mode: full (scan+crop), scan-only (build DB only), crop-only (use existing DB)')
+    parser.add_argument('--visualize-crops', action='store_true',
+                        help='Generate PNG visualizations of detected galaxies with circles marking crop regions')
     
     args = parser.parse_args()
     
@@ -422,6 +470,11 @@ def main():
     # Also skip for /dev/null (scan-only mode)
     if args.mode != 'crop-only' and args.output != '/dev/null':
         os.makedirs(args.output, exist_ok=True)
+    
+    # Create visualization output directory if needed
+    viz_output_dir = None
+    if args.visualize_crops:
+        viz_output_dir = os.path.join(args.output, 'visualizations')
     
     # Stats file path
     stats_file = os.path.join(args.stats_dir, f'worker_{args.worker_id}_stats.json')
@@ -437,7 +490,9 @@ def main():
         min_size=args.min_size,
         max_size=args.max_size,
         verbosity=args.verbosity,
-        mode=args.mode
+        mode=args.mode,
+        visualize_crops=args.visualize_crops,
+        viz_output_dir=viz_output_dir
     )
 
 
