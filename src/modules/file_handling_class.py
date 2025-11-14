@@ -5,6 +5,7 @@ import galaxy_naming as gn
 import numpy as np
 import pathlib
 import math
+# import group_discovery as gd  # Not used in current code path
 
 def _get_pos_of_file(filepath: str) -> tuple[float, float]:
     meta_data = sh.get_all_fits_meta_data(filepath)
@@ -75,12 +76,60 @@ class Gal_Pos:
         return self._approx_size
 
 class Thumbnail_Handling:
-    def __init__(self, saving_function: 'function', filepath: str = None):
+    def __init__(self, saving_function: 'function', filepath: str = None, discovery_mode: bool = False):
         # Map of canonical position -> list of Gal_Pos entries (versions)
         self._records = dict()
         self._saving_function = saving_function
+        self._discovery_mode = discovery_mode
         if filepath != None:
             self._add_files_to_record(filepath)
+        if discovery_mode:
+            pass  # self._discovery = gd.GroupDiscovery()  # Not used in current code path
+        
+        # For discovery mode: store minimal metadata for each discovered object
+        self._discovery_objects = []
+
+    def add_object_discovery_only(self, ra: float, dec: float, height: int, width: int, 
+                                   source_filename: str) -> None:
+        '''Add object metadata without geometric checks (discovery mode)'''
+        if not self._discovery_mode:
+            raise RuntimeError("Not in discovery mode")
+        
+        # Store minimal metadata
+        obj_data = {
+            'ra': ra,
+            'dec': dec,
+            'height': height,
+            'width': width,
+            'source': source_filename
+        }
+        self._discovery_objects.append(obj_data)
+
+    def get_discovery_summary(self) -> dict:
+        '''Get summary without geometry calculations'''
+        return {
+            'total_members': len(self._discovery_objects),
+            'group_count': len(set(obj['source'] for obj in self._discovery_objects))
+        }
+    
+    def save_discovery_metadata(self, filepath: str) -> None:
+        '''Save discovery metadata to JSON'''
+        import json
+        data = {
+            'total_objects': len(self._discovery_objects),
+            'objects': self._discovery_objects
+        }
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+
+    def print_discovery_report(self, detailed: bool = False, detail_limit: int = 20) -> None:
+        '''Print discovery report.'''
+        if not self._discovery_mode:
+            raise RuntimeError("print_discovery_report() requires discovery_mode=True")
+        
+        self._discovery.print_summary()
+        if detailed:
+            self._discovery.print_group_details(limit=detail_limit)
 
     def _add_files_to_record(self, filepath: str) -> None:
         '''Scan existing FITS in a directory and register them as records.
@@ -127,44 +176,54 @@ class Thumbnail_Handling:
                     return key
         return None
 
-    def _add_crop_to_group(self, gal_pos: Gal_Pos, crop_data: np.ndarray, metadata: dict, filename: str) -> None:
+    def _add_crop_to_group(self, gal_pos: Gal_Pos, crop_data: np.ndarray, metadata: dict, filename: str, waveband: str = None) -> None:
         '''adds cropped object to its group, creating if necessary'''
         key = self._find_key_for(gal_pos)
         if key is None:
-            self._records[gal_pos] = {'members': [gal_pos], 'crops': [], 'max_dims': (0,0)}
+            self._records[gal_pos] = {'members': [gal_pos], 'crops': [], 'max_dims': (0,0), 'wavebands': []}
             key = gal_pos
         else:
             self._records[key]['members'].append(gal_pos)
         
         self._records[key]['crops'].append((crop_data, metadata, filename))
+        self._records[key]['wavebands'].append(waveband)
         curHeight, curWidth = crop_data.shape
         maxHeight, maxWidth = self._records[key]['max_dims']
         self._records[key]['max_dims'] = (max(curHeight, maxHeight), max(curWidth, maxWidth))
 
     def _standardize_group(self, key: Gal_Pos) -> list:
-        '''crop all images in a group to the same size. current implementation is the maximum size'''
+        '''crop all images in a group to the same size (largest + 10% padding)'''
         group = self._records[key]
         maxHeight, maxWidth = group['max_dims']
         standardized_crops = []
 
-        for version_num, (crop_data, metadata, filename) in enumerate(group['crops'], start=1):
-            std_crop = sh.standardize_crop_dimensions(crop_data, maxHeight, maxWidth)
-            standardized_crops.append((std_crop, metadata, version_num))
+        for version_num, ((crop_data, metadata, filename), waveband) in enumerate(
+            zip(group['crops'], group['wavebands']), start=1
+        ):
+            std_crop = sh.standardize_crop_dimensions(crop_data, maxHeight, maxWidth, padding_fraction=0.1)
+            standardized_crops.append((std_crop, metadata, version_num, waveband))
 
         return standardized_crops
 
     def _finalize_and_save(self, output_dir: str) -> int:
-        '''standardize all groups and save to files'''
+        '''standardize all groups and save to files with new naming convention'''
         total_saved = 0
 
         for key in self._records.keys():
             standardized_crops = self._standardize_group(key)
 
             # prepare to save to disk
-            for std_crop, metadata, version_num in standardized_crops:
+            for std_crop, metadata, version_num, waveband in standardized_crops:
                 ra, dec = key.get_pos()
-                coord_prefix = gn.coords_to_filename_prefix(ra, dec)
-                final_filename = f"{coord_prefix}_v{version_num}.fits"
+                # Round coordinates to 6 decimal places
+                ra_rounded = gn.round_coordinate(ra, decimals=6)
+                dec_rounded = gn.round_coordinate(dec, decimals=6)
+                
+                # Use default waveband if not specified
+                waveband_str = waveband if waveband else "unknown"
+                
+                # Generate new filename format: "RA_DEC_waveband_vN.fits"
+                final_filename = f"{ra_rounded:.6f}_{dec_rounded:.6f}_{waveband_str}_v{version_num}.fits"
                 filepath = pathlib.Path(output_dir) / final_filename
 
                 self._saving_function(str(filepath), std_crop, metadata)

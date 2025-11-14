@@ -66,7 +66,7 @@ def process_fits_file(filepath: str, records_class: fhc.Thumbnail_Handling, min_
         
         bkg = sh.get_image_background(image_data)
         bkgless_data = sh.subtract_bkg(image_data)
-        celestial_objects = sh.extract_objects(bkgless_data, bkg)
+        celestial_objects = sh.extract_objects(bkgless_data, bkg, pixel_stack_limit=2000000, sub_object_limit=10000)
 
         #bkg = sep.Background(image_data.astype(np.float32))
         #bkg_rms = bkg.globalrms

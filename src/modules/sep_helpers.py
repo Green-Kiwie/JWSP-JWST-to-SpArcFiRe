@@ -174,14 +174,43 @@ def subtract_bkg(image_data: np.ndarray) -> np.ndarray:
     backgroundless_data = image_data - background_data
     return backgroundless_data
 
-def extract_objects(clean_image_data: np.ndarray, background_rms: float) -> np.ndarray:
+def extract_objects(clean_image_data: np.ndarray, background_rms: float, 
+                    pixel_stack_limit: int = 20000000, sub_object_limit: int = 100000) -> np.ndarray:
     '''Get objects in the cropped image using SEP.
-    Example input: numpy ndarray of background-subtracted image data, float RMS of background
-    Example output: numpy structured array of detected objects'''
+    
+    Args:
+        clean_image_data: numpy ndarray of background-subtracted image data
+        background_rms: float RMS of background
+        pixel_stack_limit: Maximum pixels in object buffer (default: 500000)
+        sub_object_limit: Maximum sub-objects during deblending (default: 3000)
+    
+    Returns:
+        numpy structured array of detected objects
+    
+    Note:
+        Automatically increases pixel buffer limits to handle crowded fields.
+        If deblending overflow still occurs, consider increasing sub_object_limit further.
+    '''
 
-    objects = sep.extract(clean_image_data, 1.5, err=background_rms)
-    print(f"{len(objects)} objects found.")
-    return objects
+    # Increase pixel buffer to prevent "internal pixel buffer full" errors
+    sep.set_extract_pixstack(pixel_stack_limit)
+    
+    # Increase sub-object limit to prevent deblending overflow errors
+    sep.set_sub_object_limit(sub_object_limit)
+    
+    try:
+        objects = sep.extract(clean_image_data, 1.5, err=background_rms)
+        print(f"{len(objects)} objects found.")
+        return objects
+    except Exception as e:
+        error_msg = str(e)
+        if "pixel buffer full" in error_msg.lower():
+            print(f"WARNING: {error_msg}")
+            print(f"Consider increasing pixel_stack_limit (currently {pixel_stack_limit})")
+        elif "deblending" in error_msg.lower() and "overflow" in error_msg.lower():
+            print(f"WARNING: {error_msg}")
+            print(f"Consider increasing sub_object_limit (currently {sub_object_limit})")
+        raise
 
 def plot_object_mask_on_galaxy(scaled_image_data: np.ndarray, celestial_objects: np.ndarray) -> None:
     '''Display image with ellipses overlaid for detected objects.'''

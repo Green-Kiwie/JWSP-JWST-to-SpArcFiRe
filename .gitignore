@@ -9,3 +9,9 @@ share/
 src/__pycache__/
 src/modules/__pycache__/
 myenv/
+test_output/
+test_queue/
+test_stats/
+test_coords.db
+worker_*.log
+src/TODO.md
