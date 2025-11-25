@@ -13,7 +13,7 @@ Key Features:
 - Atomic file operations to prevent race conditions
 - Per-worker statistics tracking
 
-Usage:
+Usage example:
     python parallel_galaxy_extractor.py \\
         --worker-id 0 \\
         --input src/output \\
@@ -24,6 +24,8 @@ Usage:
         --min-size 15 \\
         --max-size 100 \\
         --verbosity 1
+        --mode full \\
+        --
 '''
 
 import os
@@ -34,27 +36,32 @@ import hashlib
 import argparse
 import json
 from pathlib import Path
+from datetime import datetime
 from typing import Optional, List, Tuple
 
-# Add modules directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'modules'))
 
 from coordinate_database import CoordinateDatabase
+from memory_manager import MemoryManager
 
 
 class WorkQueue:
-    '''Filesystem-based work queue for parallel processing.
+    '''Filesystem-based work queue for parallel processing with memory management.
     
     Uses atomic file operations to coordinate work distribution among
-    multiple worker processes without requiring locks.
+    multiple worker processes without requiring locks. Integrates memory
+    management to enforce global memory budget and handles retry queue
+    for skipped large files.
     '''
     
-    def __init__(self, queue_dir: str, all_files: List[str]):
-        '''Initialize work queue.
+    def __init__(self, queue_dir: str, stats_dir: str, all_files: List[str], max_memory_gb: float = 80.0):
+        '''Initialize work queue with memory management.
         
         Args:
             queue_dir: Directory for queue state
+            stats_dir: Directory for stats and memory tracking
             all_files: List of all files to process
+            max_memory_gb: Global memory budget in GB
         '''
         self.queue_dir = Path(queue_dir)
         self.queue_dir.mkdir(parents=True, exist_ok=True)
@@ -68,42 +75,119 @@ class WorkQueue:
         
         self.claimed_dir = self.queue_dir / 'claimed'
         self.completed_dir = self.queue_dir / 'completed'
+        self.skipped_dir = self.queue_dir / 'skipped'  
         self.claimed_dir.mkdir(exist_ok=True)
         self.completed_dir.mkdir(exist_ok=True)
+        self.skipped_dir.mkdir(exist_ok=True)
+        
+        # Initialize memory manager
+        self.mem_manager = MemoryManager(stats_dir, max_total_memory_gb=max_memory_gb)
     
     def _get_file_hash(self, filepath: str) -> str:
         '''Get short hash of filepath for unique identification.'''
         return hashlib.md5(filepath.encode()).hexdigest()[:16]
     
     def claim_next_file(self, worker_id: int) -> Optional[str]:
-        '''Claim next available file for processing.
+        '''Claim next available file for processing, respecting memory budget.
+        
+        Files that exceed available memory are moved to retry queue and will
+        be retried when memory becomes available. Continuously retries skipped
+        files when memory becomes available.
         
         Returns filepath if work available, None if all work claimed/completed.
         '''
-        # Read all work items
+        # Refresh claimed/completed/skipped lists
+        claimed_hashes = set(f.name for f in self.claimed_dir.iterdir())
+        completed_hashes = set(f.name for f in self.completed_dir.iterdir())
+        skipped_hashes = set(f.name for f in self.skipped_dir.iterdir())
+        
+        # First, try files from normal work queue
         with open(self.work_file, 'r') as f:
             all_files = [line.strip() for line in f if line.strip()]
         
         for filepath in all_files:
-            # Refresh claimed/completed lists on each attempt
-            claimed_hashes = set(f.name for f in self.claimed_dir.iterdir())
-            completed_hashes = set(f.name for f in self.completed_dir.iterdir())
-            
             file_hash = self._get_file_hash(filepath)
             
-            if file_hash not in claimed_hashes and file_hash not in completed_hashes:
-                claim_file = self.claimed_dir / file_hash
-                try:
-                    with open(claim_file, 'x') as f:
-                        f.write(f"worker_{worker_id}\n{filepath}\n{time.time()}\n")
-                    return filepath
-                except FileExistsError: # Another worker claimed first
-                    continue
+            # Skip already completed/claimed files
+            if file_hash in claimed_hashes or file_hash in completed_hashes:
+                continue
+            
+            # Check memory before claiming
+            can_process, reason = self.mem_manager.can_process_file(filepath)
+            
+            if not can_process:
+                # File exceeds memory budget - move to retry queue
+                skip_file = self.skipped_dir / file_hash
+                if file_hash not in skipped_hashes:
+                    try:
+                        with open(skip_file, 'w') as f:
+                            f.write(f"{filepath}\n{reason}\n{time.time()}\n")
+                    except (IOError, OSError):
+                        pass
+                continue
+            
+            # Attempt to claim file
+            claim_file = self.claimed_dir / file_hash
+            try:
+                with open(claim_file, 'x') as f:
+                    f.write(f"worker_{worker_id}\n{filepath}\n{time.time()}\n")
+                
+                # Register memory for this file
+                estimated_mem = self.mem_manager.estimate_file_memory_usage(filepath)
+                self.mem_manager.register_worker_memory(worker_id, filepath, estimated_mem)
+                
+                # Remove from skipped if it was there
+                skip_file = self.skipped_dir / file_hash
+                if skip_file.exists():
+                    skip_file.unlink()
+                
+                return filepath
+            except FileExistsError: # Another worker claimed first
+                continue
         
+        # Second, retry files from skipped queue (waiting for memory)
+        skipped_files = [f for f in self.skipped_dir.iterdir()]
+        for skip_file in skipped_files:
+            try:
+                with open(skip_file, 'r') as f:
+                    lines = f.readlines()
+                    if len(lines) > 0:
+                        filepath = lines[0].strip()
+                        
+                        # Check if now has memory available
+                        can_process, reason = self.mem_manager.can_process_file(filepath)
+                        
+                        if can_process:
+                            # Try to claim it
+                            file_hash = self._get_file_hash(filepath)
+                            claim_file = self.claimed_dir / file_hash
+                            
+                            try:
+                                with open(claim_file, 'x') as cf:
+                                    cf.write(f"worker_{worker_id}\n{filepath}\n{time.time()}\n")
+                                
+                                # Register memory for this file
+                                estimated_mem = self.mem_manager.estimate_file_memory_usage(filepath)
+                                self.mem_manager.register_worker_memory(worker_id, filepath, estimated_mem)
+                                
+                                # Remove from skipped
+                                skip_file.unlink()
+                                
+                                return filepath
+                            except FileExistsError:
+                                # Another worker claimed first, try next skipped file
+                                continue
+            except (IOError, OSError):
+                continue
+        
+        # No work available and no skipped files ready
         return None
     
     def mark_completed(self, filepath: str, worker_id: int):
-        '''Mark file as completed.'''
+        '''Mark file as completed and unregister memory.'''
+        # Unregister memory for this worker
+        self.mem_manager.unregister_worker_memory(worker_id)
+        
         file_hash = self._get_file_hash(filepath)
         
         # Move from claimed to completed
@@ -135,6 +219,7 @@ class ProcessingStats:
         self.bytes_read = 0
         self.bytes_written = 0
         self.galaxies_extracted = 0
+        self.mode = 'full'  
     
     def update(self, bytes_read: int = 0, bytes_written: int = 0, galaxies: int = 0):
         '''Update statistics.'''
@@ -155,8 +240,10 @@ class ProcessingStats:
             'bytes_read': self.bytes_read,
             'bytes_written': self.bytes_written,
             'galaxies_extracted': self.galaxies_extracted,
+            'stage': self.mode,
             'read_bandwidth_mbps': (self.bytes_read / (1024**2)) / elapsed if elapsed > 0 else 0,
-            'write_bandwidth_mbps': (self.bytes_written / (1024**2)) / elapsed if elapsed > 0 else 0
+            'write_bandwidth_mbps': (self.bytes_written / (1024**2)) / elapsed if elapsed > 0 else 0,
+            'last_update': datetime.now().isoformat()
         }
         
         with open(self.stats_file, 'w') as f:
@@ -229,13 +316,11 @@ def process_single_fits(
         
         # Process each detected object
         for i, obj in enumerate(celestial_objects):
-            # Extract crop
             cropped_data = sh._extract_object(obj, image_data, padding=1.5, min_size=min_size, max_size=max_size, verbosity=0)
             
             if cropped_data is None:
                 continue
             
-            # Get galaxy position and size
             height, width = cropped_data.shape
             crop_size = height * width
             
@@ -253,7 +338,6 @@ def process_single_fits(
             
             if position_key in processed_positions:
                 prev_size, prev_idx = processed_positions[position_key]
-                # Keep the larger detection
                 if crop_size <= prev_size:
                     duplicates_skipped += 1
                     if verbosity >= 2:
@@ -267,7 +351,6 @@ def process_single_fits(
             processed_positions[position_key] = (crop_size, i)
             
             # In crop-only mode, don't add to DB again (avoid duplicates)
-            # Just retrieve the existing version from DB by matching source file
             if mode == 'crop-only':
                 # Look up existing galaxy instance by coordinates AND source file
                 result = db.find_galaxy_version_by_source(obj_ra, obj_dec, filename, pos_tolerance=0.5/3600.0)
@@ -277,12 +360,9 @@ def process_single_fits(
                     continue
                 group_id, version, canonical_ra, canonical_dec = result
             else:
-                # In scan or full mode, add to database (this handles grouping and version numbering)
-                # Now returns (group_id, version, canonical_ra, canonical_dec)
                 group_id, version, canonical_ra, canonical_dec = db.add_galaxy(obj_ra, obj_dec, height, width, waveband, filename)
             
             # Get group info to determine max dimensions
-
             group_info = db.get_group_info(group_id)
             max_height = group_info['max_height']
             max_width = group_info['max_width']
@@ -370,27 +450,30 @@ def worker_process(
     output_dir: str,
     db_path: str,
     queue_dir: str,
+    stats_dir: str,
     stats_file: str,
-    min_size: int = 15,
+    min_size: int = 20,
     max_size: int = 100,
     verbosity: int = 1,
     mode: str = 'full',
     visualize_crops: bool = False,
-    viz_output_dir: Optional[str] = None
+    viz_output_dir: Optional[str] = None,
+    max_memory_gb: float = 80.0
 ):
-    '''Main worker process loop.'''
+    '''Main worker process loop with memory management.'''
     
     print(f"[Worker {worker_id}] Starting...")
     
     # Initialize database connection
     db = CoordinateDatabase(db_path, position_tolerance_arcsec=0.5)
     
-    # Initialize stats
+    # Initialize stats with mode/stage
     stats = ProcessingStats(stats_file)
+    stats.mode = mode  # Store mode as stage for monitoring
     
-    # Get work queue
+    # Get work queue with memory management
     all_files = sorted(glob.glob(os.path.join(input_dir, '*.fits')))
-    work_queue = WorkQueue(queue_dir, all_files)
+    work_queue = WorkQueue(queue_dir, stats_dir, all_files, max_memory_gb=max_memory_gb)
     
     files_processed = 0
     
@@ -454,14 +537,14 @@ def main():
     parser.add_argument('--stats-dir', type=str, required=True,
                         help='Directory for worker statistics')
     parser.add_argument('--min-size', type=int, default=20,
-                        help='Minimum crop size in pixels (default: 15)')
+                        help='Minimum crop size in pixels (default: 20)')
     parser.add_argument('--max-size', type=int, default=100,
                         help='Maximum crop size in pixels (default: 100)')
     parser.add_argument('--verbosity', type=int, default=1,
                         help='Verbosity level: 0=quiet, 1=normal, 2=verbose (default: 1)')
     parser.add_argument('--mode', type=str, default='full', choices=['full', 'scan-only', 'crop-only'],
                         help='Processing mode: full (scan+crop), scan-only (build DB only), crop-only (use existing DB)')
-    parser.add_argument('--visualize-crops', action='store_true',
+    parser.add_argument('--visualize-crops', default='false', action='store_true',
                         help='Generate PNG visualizations of detected galaxies with circles marking crop regions')
     
     args = parser.parse_args()
@@ -486,13 +569,15 @@ def main():
         output_dir=args.output,
         db_path=args.db_path,
         queue_dir=args.queue_dir,
+        stats_dir=args.stats_dir,
         stats_file=stats_file,
         min_size=args.min_size,
         max_size=args.max_size,
         verbosity=args.verbosity,
         mode=args.mode,
         visualize_crops=args.visualize_crops,
-        viz_output_dir=viz_output_dir
+        viz_output_dir=viz_output_dir,
+        max_memory_gb=80.0
     )
 
 

@@ -48,8 +48,13 @@ def _fill_nan(image_data: np.ndarray) -> np.ndarray:
     
     return image_copy
 
-def get_main_fits_data(filepath: str) -> np.ndarray:
-    '''Loads main image data from a FITS file.
+def get_main_fits_data(filepath: str, max_memory_gb: float = 20.0) -> np.ndarray:
+    '''Loads main image data from a FITS file with optional downsampling for large files.
+    
+    Args:
+        filepath: Path to FITS file
+        max_memory_gb: Maximum memory for raw image (GB). Files larger than this will be downsampled.
+    
     Example input: "path/to/file.fits"
     Example output: numpy ndarray of image data'''
 
@@ -59,6 +64,22 @@ def get_main_fits_data(filepath: str) -> np.ndarray:
         image_data = hdul['SCI'].data
     except:
         image_data = hdul[0].data
+
+    # Calculate image size in GB
+    image_size_gb = image_data.nbytes / (1024**3)
+    
+    # Downsample if image exceeds memory limit
+    if image_size_gb > max_memory_gb:
+        downsample_factor = int(np.ceil(np.sqrt(image_size_gb / max_memory_gb)))
+        original_shape = image_data.shape
+        new_shape = (original_shape[0] // downsample_factor, original_shape[1] // downsample_factor)
+        
+        print(f"  Downsampling {image_size_gb:.1f}GB image by {downsample_factor}x -> {new_shape[0]}x{new_shape[1]} ({new_shape[0]*new_shape[1]*image_data.itemsize/(1024**3):.1f}GB)")
+        
+        # Use block averaging for downsampling (preserves galaxy structure better than simple decimation)
+        from skimage.transform import resize
+        image_data = resize(image_data, new_shape, order=1, preserve_range=True, anti_aliasing=True)
+        image_data = image_data.astype(np.float32)  # Ensure consistent dtype
 
     image_data_no_nan = _fill_nan(image_data)
     byte_swapped_data = image_data_no_nan.byteswap().view(image_data_no_nan.dtype.newbyteorder('='))
