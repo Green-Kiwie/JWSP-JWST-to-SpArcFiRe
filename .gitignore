@@ -15,3 +15,13 @@ test_stats/
 test_coords.db
 worker_*.log
 src/TODO.md
+prod_output/
+prod_queue/
+prod_stats/
+prod_coords.db
+prod_coords.db-shm
+prod_coords.db-wal
+src/.vscode/
+src/AlignBandColors/
+output.zip
+monitor_dashboard.sh
