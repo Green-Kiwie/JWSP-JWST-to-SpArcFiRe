@@ -5,7 +5,9 @@ Tracks memory usage across all workers and enforces a global memory budget.
 This prevents OOM by ensuring the combined memory usage of all workers
 never exceeds the specified limit.
 
-Memory estimation: file_size * 4 (raw data + 3x working buffers for SEP operations)
+Memory estimation: file_size * 2.5 (raw data + working buffers for SEP operations)
+- Conservative but not overly pessimistic
+- Accounts for: raw image, background-subtracted copy, SEP working memory
 """
 
 import json
@@ -22,6 +24,10 @@ class MemoryManager:
     how much memory it's using. Before a worker claims a file, it checks
     if the estimated memory would exceed the global budget.
     """
+    
+    # Memory multiplier: raw data + background + SEP buffers
+    # Reduced from 4x to 2.5x based on actual usage patterns
+    MEMORY_MULTIPLIER = 2.5
     
     def __init__(self, stats_dir: str, max_total_memory_gb: float = 80.0):
         """Initialize memory manager.
@@ -61,8 +67,8 @@ class MemoryManager:
     def estimate_file_memory_usage(self, filepath: str, max_image_memory_gb: float = 20.0) -> int:
         """Estimate memory needed to process a file with downsampling.
         
-        For files >20GB, downsampling reduces memory to 20GB * 4 = 80GB
-        For files <=20GB, memory = file_size * 4 (raw + 3x working buffers)
+        For files >20GB, downsampling reduces memory to 20GB * multiplier
+        For files <=20GB, memory = file_size * multiplier
         
         Args:
             filepath: Path to FITS file
@@ -77,10 +83,9 @@ class MemoryManager:
             
             # If file exceeds max, it will be downsampled to max_image_memory_gb
             if file_size > max_image_bytes:
-                estimated_memory = max_image_bytes * 4
+                estimated_memory = int(max_image_bytes * self.MEMORY_MULTIPLIER)
             else:
-                # 4x multiplier: raw data + 3 working buffer copies for SEP operations
-                estimated_memory = file_size * 4
+                estimated_memory = int(file_size * self.MEMORY_MULTIPLIER)
             
             return estimated_memory
         except (OSError, FileNotFoundError):
@@ -193,3 +198,24 @@ class MemoryManager:
             "usage_percent": (active / budget * 100) if budget > 0 else 0,
             "workers": self._read_memory_file()
         }
+    
+    def is_all_workers_idle(self) -> bool:
+        """Check if all workers have zero memory allocated.
+        
+        Returns:
+            True if no workers are using memory, False otherwise
+        """
+        return self.get_active_memory_usage() == 0
+    
+    def get_active_worker_count(self) -> int:
+        """Get the number of workers currently using memory.
+        
+        Returns:
+            Count of workers with non-zero memory allocation
+        """
+        memory_data = self._read_memory_file()
+        count = 0
+        for worker_id, entries in memory_data.items():
+            if isinstance(entries, dict) and entries.get('memory_bytes', 0) > 0:
+                count += 1
+        return count
