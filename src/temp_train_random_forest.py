@@ -32,9 +32,8 @@ try:
         for feature in range(feature_start, feature_end, feature_step):
             for buckets in range(num_buckets_start, num_buckets_end, num_buckets_step):
                 print(f"starting training for {tree} trees, {feature} features and {buckets} buckets")
-                trained_model = rf.RandomForestTrainer(tree, feature, filepath = filepath, split_test_train_function = rf.bucket_based_split_test, split_test_inputs = {"num_buckets": buckets, "random_state": 42, "test_size": 0.2})
+                trained_model = rf.RandomForestTrainer(tree, feature, filepath = filepath, split_test_train_function = rf.bucket_based_split_test, split_test_inputs = {"num_buckets": buckets, "random_state": 42, "test_size": 0.2}, scale_data = False)
                 print(trained_model.summary_msg())
-                print(trained_model.above_40_statistics())
                 with open(f"random_forest_output.txt", 'a') as file:
                     file.write(trained_model.summary_msg())
                 

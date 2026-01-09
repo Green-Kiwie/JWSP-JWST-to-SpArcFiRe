@@ -5,6 +5,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import reading_sparcfire as sparcfire
 
@@ -26,13 +27,13 @@ class RandomForestTrainer:
     def train_x(self) -> pd.DataFrame:
         """returns the training dataset"""
         indexes =  self.full_dataset()[self.full_dataset()["split"] == "train"].index
-        return self._transformed_dataset.loc[indexes]
+        return self._scaled_dataset.loc[indexes]
 
     def test_x(self, percentage = 1) -> pd.DataFrame:
         """returns a certain percentage of the testing dataset, default 100%"""
         test_indices = self.full_dataset()[self.full_dataset()["split"] == "test"].index
         sampled_indices = self._full_dataset.loc[test_indices].sample(frac=percentage, random_state=42).index
-        return self._transformed_dataset.loc[sampled_indices]
+        return self._scaled_dataset.loc[sampled_indices]
         
     def train_y(self) -> pd.DataFrame:
         """returns the training dataset"""
@@ -76,22 +77,38 @@ class RandomForestTrainer:
     def summary_msg(self) -> str:
         """returns a string of format: 
         'for {num of trees} and {num of features} features, training r^2: {accuracy score}, testing r^2: {accuracy score}'"""
-        return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data r^2: {self.training_r2():.2f}, testing data r^2: {self.testing_r2():.2f}, training data rmse: {self.training_rmse():.2f}, testing data rmse: {self.testing_rmse():.2f} \n"
+        return f"for {self.num_trees()} trees, {self.num_features()} features and {self._buckets} buckets, training data r^2: {self.training_r2():.4f}, testing data r^2: {self.testing_r2():.4f}, training data rmse: {self.training_rmse():.4f}, testing data rmse: {self.testing_rmse():.4f} \n"
     
-    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, filepath: str = "randomforest_training_data/data.csv", split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}):
+    def above_40_statistics(self) -> str:
+        """returns a string that gives accuracy for non-duplicated values that have actual spirality of above 0.40"""
+        above_40_data = self._full_dataset[self._full_dataset["P_spiral"] >= 0.40]
+        above_40_test = above_40_data[above_40_data["split"] == "test"]
+        distinct_above_40 = above_40_test.drop_duplicates()
+
+        y_true = distinct_above_40["P_spiral"].values
+        y_pred = distinct_above_40["P_spiral_predicted"].values
+
+        rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
+
+        return f"for distinct above 0.40 spirality, rmse is {rmse:.8f}"
+
+    def __init__(self, num_trees: int, num_features: int, split_test_train_function: Callable = train_test_split, filepath: str = "randomforest_training_data/data.csv", split_test_inputs: dict = {"random_state": 42, "test_size": 0.2, "num_buckets": 1}, scale_data: bool = True):
         self._num_trees = num_trees
         self._num_features = num_features
         self._buckets = split_test_inputs["num_buckets"]
+        
+        self._scale_flag = scale_data
 
         self._full_dataset = self._load_training_data(split_test_train_function, split_test_inputs, filepath=filepath)
         self._transformed_dataset, self._data_transformer = self.transform_data()
+        self._scaled_dataset, self._data_scaler = self.scale_features()
 
         self._rf_model = self._train_random_forest(self.train_x(), self.train_y(), num_trees, num_features)
         
         # predictions = self._rf_model.predict(self._transformed_dataset)
         # self._full_dataset["P_spiral_predicted"] = predictions
 
-        predictions = self._rf_model.predict(self._transformed_dataset)
+        predictions = self._rf_model.predict(self._scaled_dataset)
         self._full_dataset["P_spiral_predicted"] = pd.Series(predictions, index=self._transformed_dataset.index)
         del predictions
 
@@ -138,6 +155,25 @@ class RandomForestTrainer:
             encoded_data[col] = le.fit_transform(encoded_data[col])
             label_encoders[col] = le
         return encoded_data, label_encoders
+
+    def scale_features(self) -> tuple[pd.DataFrame, StandardScaler]:
+        """scales numerical features using standard scalar"""
+        if (self._scale_flag == False):
+            return self._transformed_dataset, None
+        
+        numeric_cols = self._transformed_dataset.select_dtypes(include=[np.number]).columns
+        print("scaled columns: " + str(list(numeric_cols)))
+        scaler = StandardScaler()
+
+
+        scaler = StandardScaler()
+        train_indices = self._full_dataset[self._full_dataset["split"] == "train"].index
+        scaler.fit(self._transformed_dataset.loc[train_indices, numeric_cols])
+
+        scaled_array = scaler.transform(self._transformed_dataset[numeric_cols])
+        scaled_df = pd.DataFrame(scaled_array, columns=numeric_cols, index=self._transformed_dataset.index)
+
+        return scaled_df, scaler
     
     def save_model(self, path: Path) -> None:
         """saves model to a .pkl file"""
@@ -153,6 +189,23 @@ class RandomForestTrainer:
 
         joblib.dump(self._data_transformer, str(path))
         print(f"Label encoder saved to {path}.")
+
+    def print_feature_importance(self) -> None:
+        """prints the feature importance of features in trained model """
+        importances = self._rf_model.feature_importances_
+        feature_names = self.train_x().columns
+        
+        if len(importances) != len(feature_names):
+            print(f"[Warning] Mismatch: {len(importances)} importances vs {len(feature_names)} features.")
+            return
+
+        importance_df = pd.DataFrame({
+            "Feature": feature_names,
+            "Importance": importances
+        }).sort_values(by="Importance", ascending=False)
+
+        print("Feature importance:")
+        print(importance_df.to_string(index=False))
     
     @staticmethod
     def _get_target(training_data: pd.DataFrame) -> pd.Series:

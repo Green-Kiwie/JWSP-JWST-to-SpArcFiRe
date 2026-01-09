@@ -1,6 +1,7 @@
 import pandas as pd
 from pathlib import Path
 import numpy as np
+import re
 
 dtype = {
     "name": "string",
@@ -161,12 +162,18 @@ dtype = {
 
 def _parse_str_to_np(s: str) -> np.array:
     """used to parse data when loading data"""
-    s = s.strip("[]")
+    # print("s:" + s)
+    s = re.sub(r'[\[\]]', '', s)
+    # print("s stripped:" + s)
+    # print(np.fromstring(s, sep=' ', dtype=float))
+    # exit()
     return np.fromstring(s, sep=' ', dtype=float)
 
 def _load_data(filepath: Path) -> pd.DataFrame:
     """loads a csv according to format"""
     main_data = pd.read_csv(filepath, dtype=dtype)
+
+    main_data.columns = main_data.columns.str.strip()
 
     list_cols = [
         "iptSz", "covarFit", "chirality_votes_maj",
@@ -174,16 +181,26 @@ def _load_data(filepath: Path) -> pd.DataFrame:
     ]
 
     for col in list_cols:
-        main_data[col] = main_data[col].apply(_parse_str_to_np)
+        if col == "covarFit":
+            main_data[col] = main_data[col].apply(_parse_str_to_np)
 
-        expanded_cols = main_data[col].apply(pd.Series)
-
-        expanded_cols.columns = [f"{col}_{i}" for i in expanded_cols.columns]
+            main_data[col] = main_data[col].apply(
+                lambda x: list(x)[:7] + [None] * (7 - len(x)) if isinstance(x, (list, np.ndarray)) else [None] * 7
+            )
+            expanded_cols = pd.DataFrame(main_data[col].tolist(), columns=[f"{col}_{i}" for i in range(7)])
+    
+        else:
+            main_data[col] = main_data[col].apply(_parse_str_to_np)
+            expanded_cols = main_data[col].apply(pd.Series)
+            expanded_cols.columns = [f"{col}_{i}" for i in expanded_cols.columns]
 
         main_data = pd.concat([main_data, expanded_cols], axis=1)
-
         main_data.drop(columns=[col], inplace=True)
+
     
+    print("columns")
+    print(list(main_data.columns))
+
     return main_data
 
 
