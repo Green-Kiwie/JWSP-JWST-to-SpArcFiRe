@@ -26,3 +26,5 @@ src/AlignBandColors/
 output.zip
 monitor_dashboard.sh
 outputs/
+src/JWST/TODO.md
+src/download_csv/
