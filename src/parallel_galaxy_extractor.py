@@ -3,17 +3,7 @@
 Parallel Galaxy Extractor for JWST FITS Files
 
 This script processes JWST FITS files in parallel, extracting galaxies using SEP
-and grouping them by coordinates across different wavebands. Designed for 
-concurrent execution with multiple workers sharing a common work queue.
-
-Key Features:
-- Filesystem-based work queue for coordination between workers
-- SQLite database for coordinate-based galaxy grouping
-- Within-file deduplication to handle SEP multi-detections
-- Atomic file operations to prevent race conditions
-- Per-worker statistics tracking
-- Automatic worker respawning to maintain worker count
-- Robust error handling for long-running processes
+and grouping them by coordinates across different wavebands.
 
 Usage examples:
     # Run with 7 workers (recommended for long-running processes)
@@ -29,7 +19,8 @@ Usage examples:
         --verbosity 1 \ 
         --mode scan-only
 
-    (one liner) 
+    (one liner example) 
+    
     python parallel_galaxy_extractor.py --num-workers 7 --input output --output count --db-path count.db --queue-dir count_queue --stats-dir count_stats --min-size 20 --max-size 100 --verbosity 1 --mode scan-only
 '''
 
@@ -53,9 +44,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'modules'))
 from coordinate_database import CoordinateDatabase
 from memory_manager import MemoryManager
 
-# Global flag for graceful shutdown
 _shutdown_requested = False
-
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -66,7 +55,7 @@ def signal_handler(signum, frame):
 
 @contextmanager
 def timeout_context(seconds: int, description: str = "operation"):
-    """Context manager for timing out operations (Unix only)."""
+    """Context manager for timing out operations."""
     def timeout_handler(signum, frame):
         raise TimeoutError(f"{description} timed out after {seconds} seconds")
     
@@ -79,19 +68,10 @@ def timeout_context(seconds: int, description: str = "operation"):
             signal.alarm(0)
             signal.signal(signal.SIGALRM, old_handler)
     else:
-        # Windows doesn't support SIGALRM, just yield without timeout
         yield
 
 
 class WorkQueue:
-    '''Filesystem-based work queue for parallel processing with memory management.
-    
-    Uses atomic file operations to coordinate work distribution among
-    multiple worker processes without requiring locks. Integrates memory
-    management to enforce global memory budget and handles retry queue
-    for skipped large files.
-    '''
-    
     def __init__(self, queue_dir: str, stats_dir: str, all_files: List[str], max_memory_gb: float = 80.0):
         '''Initialize work queue with memory management.
         
@@ -114,7 +94,7 @@ class WorkQueue:
         self.claimed_dir = self.queue_dir / 'claimed'
         self.completed_dir = self.queue_dir / 'completed'
         self.skipped_dir = self.queue_dir / 'skipped'
-        self.failed_dir = self.queue_dir / 'failed'  # Track permanently failed files
+        self.failed_dir = self.queue_dir / 'failed'
         self.claimed_dir.mkdir(exist_ok=True)
         self.completed_dir.mkdir(exist_ok=True)
         self.skipped_dir.mkdir(exist_ok=True)
@@ -123,15 +103,15 @@ class WorkQueue:
         # Initialize memory manager
         self.mem_manager = MemoryManager(stats_dir, max_total_memory_gb=max_memory_gb)
         
-        # Stale claim timeout (seconds) - if a worker dies, its claims become stale
-        self.stale_claim_timeout = 3600  # 1 hour
+        # If a worker dies, its claims become stale
+        self.stale_claim_timeout = 3600
     
     def _get_file_hash(self, filepath: str) -> str:
         '''Get short hash of filepath for unique identification.'''
         return hashlib.md5(filepath.encode()).hexdigest()[:16]
     
     def _is_claim_stale(self, claim_file: Path) -> bool:
-        '''Check if a claim file is stale (worker may have died).'''
+        '''Check if a claim file is stale.'''
         try:
             with open(claim_file, 'r') as f:
                 lines = f.readlines()
@@ -201,19 +181,19 @@ class WorkQueue:
             
             for filepath in all_files:
                 file_hash = self._get_file_hash(filepath)
-                # If any file is not in completed, skipped, failed, or claimed - first pass not done
+                
                 if file_hash not in completed_hashes and file_hash not in skipped_hashes and \
                    file_hash not in failed_hashes and file_hash not in claimed_hashes:
                     return False
             
-            # Also check that nothing is currently being processed
+            # Check that nothing is currently being processed
             return len(claimed_hashes) == 0
             
         except (IOError, OSError):
             return False
     
     def claim_next_file(self, worker_id: int) -> Optional[str]:
-        '''Claim next available file for processing, respecting memory budget.
+        '''Claim next available file for processing.
         
         Two-phase processing:
         1. First pass: Process all files from work queue, skip files that don't fit in memory
@@ -301,7 +281,7 @@ class WorkQueue:
         
         # PHASE 2: Only process skipped files after first pass is complete
         if not self._is_first_pass_complete():
-            # First pass not done - don't process retry queue yet
+            # First pass not done
             return None
         
         # First pass complete - now retry skipped files
@@ -357,7 +337,6 @@ class WorkQueue:
                     
                     elif all_workers_idle:
                         # File cannot be processed even with all memory available
-                        # This file is truly too large - permanently fail it
                         failed_file = self.failed_dir / file_hash
                         try:
                             with open(failed_file, 'w') as ff:
@@ -432,7 +411,6 @@ class WorkQueue:
         (self.queue_dir / 'retries').mkdir(exist_ok=True)
         
         # Check if this is an out-of-memory error during processing
-        # These should go back to the skipped queue, not the failed queue
         is_memory_error = 'memory' in error_msg.lower() or 'memoryerror' in error_msg.lower()
         
         if is_memory_error:
@@ -552,11 +530,11 @@ class ProcessingStats:
             'read_bandwidth_mbps': (self.bytes_read / (1024**2)) / elapsed if elapsed > 0 else 0,
             'write_bandwidth_mbps': (self.bytes_written / (1024**2)) / elapsed if elapsed > 0 else 0,
             'last_update': datetime.now().isoformat(),
-            'recent_errors': self.errors[-10:]  # Include last 10 errors
+            'recent_errors': self.errors[-10:]
         }
         
         try:
-            # Write to temp file first, then rename (atomic operation)
+            # Write to temp file first, then rename
             temp_file = self.stats_file.with_suffix('.tmp')
             with open(temp_file, 'w') as f:
                 json.dump(stats, f, indent=2)
@@ -574,8 +552,7 @@ def process_single_fits(
     verbosity: int = 1,
     mode: str = 'full',
     visualize_crops: bool = False,
-    viz_output_dir: Optional[str] = None,
-    timeout_seconds: int = 3600  # 1 hour timeout per file
+    viz_output_dir: Optional[str] = None
 ) -> Tuple[int, int, Optional[str]]:
     '''Process a single FITS file with comprehensive error handling.
     
@@ -695,9 +672,9 @@ def process_single_fits(
             # Mark this position as processed
             processed_positions[position_key] = (crop_size, i)
             
-            # In crop-only mode, don't add to DB again (avoid duplicates)
+            # In crop-only mode, don't add to DB again (to avoid duplicates)
             if mode == 'crop-only':
-                # Look up existing galaxy instance by coordinates AND source file
+                # Look up existing galaxy instance by coordinates and source file
                 result = db.find_galaxy_version_by_source(obj_ra, obj_dec, filename, pos_tolerance=0.5/3600.0)
                 if result is None:
                     if verbosity >= 2:
@@ -792,13 +769,13 @@ def process_single_fits(
             msg += ")"
             print(msg)
         
-        return file_size, galaxies_saved, None  # No error
+        return file_size, galaxies_saved, None 
         
     except MemoryError as e:
         error_message = f"Out of memory: {str(e)}"
         print(f"ERROR processing {filepath}: {error_message}")
         import gc
-        gc.collect()  # Try to free memory
+        gc.collect() 
         return os.path.getsize(filepath) if os.path.exists(filepath) else 0, 0, error_message
         
     except Exception as e:
@@ -868,7 +845,7 @@ def worker_process(
     consecutive_errors = 0
     max_consecutive_errors = 10
     idle_iterations = 0
-    max_idle_iterations = 60  # ~1 minute of no work before checking if truly done
+    max_idle_iterations = 60  
     
     while not _shutdown_requested:
         try:
@@ -889,10 +866,9 @@ def worker_process(
                           f"status: {status}")
                     if status['remaining'] == 0:
                         break
-                    # There may be work but memory constrained; wait longer
                     idle_iterations = 0
                 
-                time.sleep(1)  # Wait before trying again
+                time.sleep(1)
                 continue
             
             idle_iterations = 0  # Reset idle counter
@@ -933,7 +909,7 @@ def worker_process(
                     # Success
                     stats.update(bytes_read=bytes_read, galaxies=galaxies, filename=filename)
                     files_processed += 1
-                    consecutive_errors = 0  # Reset error counter
+                    consecutive_errors = 0 
                     
                     # Mark as completed
                     work_queue.mark_completed(filepath, worker_id)
@@ -945,7 +921,7 @@ def worker_process(
                           f"Rate: {bandwidth_mbps:.2f} MB/s")
                 
             except MemoryError:
-                # Critical memory error - release memory and mark as failed
+                # Release memory and mark as failed
                 import gc
                 gc.collect()
                 
@@ -971,22 +947,18 @@ def worker_process(
             break
             
         except Exception as e:
-            # Catch-all for any other errors in the main loop
             print(f"[Worker {worker_id}] Unexpected error in main loop: {e}")
             if verbosity >= 2:
                 traceback.print_exc()
             consecutive_errors += 1
-            time.sleep(5)  # Brief pause before continuing
+            time.sleep(5) 
     
     print(f"[Worker {worker_id}] Finished. Processed {files_processed} files.")
     return 0
 
 
 def worker_wrapper(worker_id: int, args_dict: dict, result_queue: mp.Queue):
-    """Wrapper function for worker process that reports completion status.
-    
-    This wrapper catches all exceptions and reports results back to the supervisor.
-    """
+    """Wrapper function for worker process that reports completion status."""
     try:
         exit_code = worker_process(
             worker_id=worker_id,
@@ -1095,7 +1067,7 @@ def supervisor_process(
             status = work_queue.get_queue_status()
             return status['remaining'] > 0 or status['skipped'] > 0
         except Exception:
-            return True  # Assume work remains if we can't check
+            return True
     
     # Start initial workers
     for worker_id in range(num_workers):
@@ -1177,7 +1149,6 @@ def supervisor_process(
                     print("[Supervisor] All workers completed and no work remaining")
                     break
                 else:
-                    # Work remains but all workers are done - something is wrong
                     # Try to restart workers
                     print("[Supervisor] Work remains but no active workers, restarting...")
                     for worker_id in range(num_workers):
@@ -1277,7 +1248,7 @@ Examples:
 '''
     )
     
-    # Worker specification (mutually exclusive)
+    # Worker specification
     worker_group = parser.add_mutually_exclusive_group(required=True)
     worker_group.add_argument('--num-workers', type=int,
                               help='Number of parallel workers to run (recommended)')
@@ -1324,7 +1295,6 @@ Examples:
         os.makedirs(viz_output_dir, exist_ok=True)
     
     if args.num_workers is not None:
-        # Multi-worker mode with supervisor
         if args.num_workers < 1:
             print("Error: --num-workers must be at least 1")
             sys.exit(1)
@@ -1346,7 +1316,7 @@ Examples:
             max_respawns_per_worker=args.max_respawns
         )
     else:
-        # Legacy single-worker mode
+        # old single worker mode
         stats_file = os.path.join(args.stats_dir, f'worker_{args.worker_id}_stats.json')
         
         exit_code = worker_process(
