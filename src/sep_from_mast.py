@@ -74,9 +74,10 @@ def _filter_uris(uri_list: pd.Series) -> pd.Series:
         return uri_list
     
 def _download_uri(uri: str) -> tuple[str, bool]:
-    '''downloads uri from mast database. returns true if successfully download. else, return false'''
-    filepath = 'output/' + uri[17:]
-    if (os.path.exists(filepath)):
+    '''downloads uri from mast database. skips download if file already exists. returns filepath'''
+    filepath = 'outputTest/' + uri[17:]
+    if os.path.exists(filepath):
+        print(f"Skipping download: {filepath} already exists")
         return filepath
     mi.download_file(uri, filepath)
     return filepath
@@ -138,7 +139,7 @@ if __name__ == '__main__':
 
     count = 0
     total = len(uris)
-    output_filepath = 'output/objects_from_mast_csv/'
+    output_filepath = 'outputTest/objects_from_mast_csv/'
     _create_directory(output_filepath)
 
     records_class = fhc.Thumbnail_Handling(sh.save_to_fits, output_filepath)
@@ -158,7 +159,7 @@ if __name__ == '__main__':
                 error = e
                 pass
         else:
-            _log_errored_download("output/mast_csv_error", uri, error)
+            _log_errored_download("outputTest/mast_csv_error", uri, error)
             count += 1
             print("File unable to download, error logged.")
         

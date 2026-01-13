@@ -20,3 +20,8 @@ testing_data/
 xg_boost.txt
 ../temp_standard_output.txt
 ../venv/
+count_queue/
+count_stats/
+count.db
+count.db-shm
+count.db-wal

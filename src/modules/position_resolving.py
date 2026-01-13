@@ -1,4 +1,3 @@
-
 from astropy.wcs import WCS
 import numpy as np
 
