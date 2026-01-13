@@ -25,3 +25,4 @@ src/.vscode/
 src/AlignBandColors/
 output.zip
 monitor_dashboard.sh
+outputs/

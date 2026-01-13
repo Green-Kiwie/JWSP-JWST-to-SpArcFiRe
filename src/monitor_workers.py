@@ -4,7 +4,6 @@ Real-time monitoring dashboard for parallel galaxy extraction workers.
 Shows MB/s throughput, files processed, ETA, per-worker stats, and processing stage.
 
 Usage:
-    python monitor_workers.py                          # Uses default dirs (prod_stats, prod_queue)
     python monitor_workers.py --stats-dir count_stats --queue-dir count_queue --db-path count.db
 """
 
