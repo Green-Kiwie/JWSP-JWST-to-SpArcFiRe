@@ -25,3 +25,6 @@ count_stats/
 count.db
 count.db-shm
 count.db-wal
+PAN-STARRS/csv/
+PAN-STARRS/melody-pan-starrs/
+random_forest/output/
