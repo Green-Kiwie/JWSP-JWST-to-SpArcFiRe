@@ -48,8 +48,6 @@ def _get_val_len(value: bool|str|int|float) -> int:
             length = 4
         else:
             length = 5
-    else:
-        length = len(str(value))
     return length
 
 
