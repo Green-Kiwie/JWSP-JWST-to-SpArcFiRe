@@ -521,8 +521,7 @@ def generate_images(galaxy_info, kept_indices, actual_arr, predicted_arr,
         predicted_val = float(predicted_arr[i])
 
         # File name based on predicted spirality classification
-        safe_name = name.replace('+', 'p').replace('-', 'm')
-        filename = f"{safe_name}.png"
+        filename = f"{predicted_val:.4f}.png"
         out_path = os.path.join(output_dir, filename)
 
         ok = download_and_annotate_image(
