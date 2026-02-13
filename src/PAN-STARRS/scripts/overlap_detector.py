@@ -1,9 +1,12 @@
 '''
 Script to save all galaxies that are present in the Galaxy Zoo 2 catalog and Shamir catalog by RA/DEC.
-Only saves galaxies that are "superclean" in GZ2 ("t04_spiral_a08_spiral_weighted_fraction" > 0.95)
+We use the Shamir catalog as a reference of what galaxies are present in the PAN-STARRS survey, since we do not
+have individual RA/DEC for each galaxy in the PAN-STARRS catalog.
 '''
-
+    
 import csv
+LOWER_THRESHOLD = 0.9 # inclusive
+UPPER_THRESHOLD = 1.0 # exclusive
 
 def load_csv(file_path):
     with open(file_path, mode='r', newline='') as file:
@@ -13,7 +16,7 @@ def load_csv(file_path):
 
 def main():
     '''
-    1) Check GZ2 for superclean spirals.
+    1) Check GZ2 for spirals within the specified threshold.
     2) Cross-match with Shamir catalog by RA/DEC.
     3) Save matched galaxies to new CSV.
     '''
@@ -24,7 +27,7 @@ def main():
     galaxy_zoo_data = load_csv(galaxy_zoo_csv)
     shamir_data = load_csv(shamir_csv)
 
-    # Check GZ2 for superclean spirals
+    # Check GZ2 for spirals within the specified threshold
     superclean_spirals = []
     skipped_rows = 0
     value_error_count = 0
@@ -36,7 +39,7 @@ def main():
         try:
             spiral_fraction = float(row[54])  # Column 54 (0-indexed) = "t04_spiral_a08_spiral_weighted_fraction"
             valid_spiral_fractions += 1
-            if spiral_fraction >= 0.95:
+            if spiral_fraction >= LOWER_THRESHOLD and spiral_fraction < UPPER_THRESHOLD:
                 superclean_spirals.append([row[1], row[2]])
         except ValueError:
             value_error_count += 1
@@ -49,7 +52,7 @@ def main():
                 print(f"IndexError - Row length: {len(row)}, First few fields: {row[:3] if len(row) >= 3 else row}")
             continue
     
-    print(f"Found {len(superclean_spirals)} superclean spirals (>= 0.95)")
+    print(f"Found {len(superclean_spirals)} spirals within threshold ({LOWER_THRESHOLD} <= fraction < {UPPER_THRESHOLD})")
     
     shamir_dict = {} # Key: (rounded_ra, rounded_dec), Value: none
     for shamir_row in shamir_data[1:]:
@@ -74,8 +77,8 @@ def main():
     for i, gz_row in enumerate(superclean_spirals):
         if i % 500 == 0:
             print(f"Processed {i}/{len(superclean_spirals)} spirals with {num_matches} current matches...")
-        
-        # RA/DEC of the superclean spirals
+
+        # RA/DEC of the spirals
         ra = float(gz_row[0])      
         dec = float(gz_row[1])
         
@@ -87,11 +90,14 @@ def main():
                 matched_galaxies.append([ra, dec])
                 num_matches += 1
                 break 
+        
+        if num_matches % 100 == 0 and num_matches > 0:
+            break
     
     print(f"Number of matched galaxies: {num_matches}")
 
     # Save matched galaxies to new CSV
-    output_csv = '../csv/matched_galaxies.csv'
+    output_csv = f'../csv/matched_galaxies_spirality_{LOWER_THRESHOLD}_{UPPER_THRESHOLD}.csv'
     with open(output_csv, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow(['RA', 'DEC'])
