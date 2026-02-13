@@ -1,3 +1,10 @@
 7000images/
 archive/
 sample_data/
+blurred_random_forest_model_output/
+blurred_random_forest_output/
+original_random_forest_model_output/
+original_random_forest_output/
+*.log
+logs/
+testing_data/

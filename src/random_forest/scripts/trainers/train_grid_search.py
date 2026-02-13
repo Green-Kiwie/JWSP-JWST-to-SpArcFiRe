@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Train Random Forest Grid Search (Fast Version)
+Train Random Forest Grid Search
 
 This script loads pre-augmented data ONCE, then trains 560 models in parallel.
 Data is loaded into memory before spawning workers, so each worker only trains.
