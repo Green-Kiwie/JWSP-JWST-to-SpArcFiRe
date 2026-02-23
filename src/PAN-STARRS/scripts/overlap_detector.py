@@ -29,22 +29,29 @@ def main():
 
     # Check GZ2 for spirals within the specified threshold
     superclean_spirals = []
+    valid_spiral_fractions = 0
+
+    # Random metrics
     skipped_rows = 0
     value_error_count = 0
     total_rows = 0
-    valid_spiral_fractions = 0
+    
+    print(f"Row 52 is {galaxy_zoo_data[0][52]}") # column label check
+    print(f"Row 55 is {galaxy_zoo_data[0][55]}") # column label check
     
     for row in galaxy_zoo_data[1:]:
         total_rows += 1
         try:
-            spiral_fraction = float(row[54])  # Column 54 (0-indexed) = "t04_spiral_a08_spiral_weighted_fraction"
+            spiral_fraction = float(row[55])  # t04_spiral_a08_spiral_debiased
+            num_responses = float(row[52])    # t04_spiral_a08_spiral_weight
             valid_spiral_fractions += 1
-            if spiral_fraction >= LOWER_THRESHOLD and spiral_fraction < UPPER_THRESHOLD:
+            if spiral_fraction >= LOWER_THRESHOLD and spiral_fraction < UPPER_THRESHOLD and num_responses >= 5:
                 superclean_spirals.append([row[1], row[2]])
+                print(f"Added spirality {spiral_fraction} with {num_responses} responses for spirality")
         except ValueError:
             value_error_count += 1
             if value_error_count <= 3:
-                print(f"ValueError - Column 54 value: '{row[54]}' (length {len(row[54])})")
+                print(f"ValueError - Column 55 value: '{row[55]}' (length {len(row[55]) if len(row) > 55 else 'N/A'}) in row with length {len(row)}")
             continue
         except IndexError as e:
             skipped_rows += 1
@@ -90,9 +97,6 @@ def main():
                 matched_galaxies.append([ra, dec])
                 num_matches += 1
                 break 
-        
-        if num_matches % 100 == 0 and num_matches > 0:
-            break
     
     print(f"Number of matched galaxies: {num_matches}")
 
@@ -102,6 +106,6 @@ def main():
         writer = csv.writer(file)
         writer.writerow(['RA', 'DEC'])
         writer.writerows(matched_galaxies)
-
+    
 if __name__ == "__main__":
     main()
