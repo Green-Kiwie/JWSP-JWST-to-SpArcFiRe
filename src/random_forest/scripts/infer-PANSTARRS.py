@@ -111,7 +111,7 @@ def build_gz2_lookup(gz2_path: str) -> dict:
         header = f.readline().strip().split(',')
         ra_idx = header.index('ra')
         dec_idx = header.index('dec')
-        spiral_idx = header.index('t04_spiral_a08_spiral_weighted_fraction')
+        spiral_idx = header.index('t04_spiral_a08_spiral_debiased')
         for line in f:
             parts = line.strip().split(',')
             if len(parts) <= max(ra_idx, dec_idx, spiral_idx):
@@ -467,7 +467,7 @@ def _sdss_get_image(ra: float, dec: float, size: int = 240):
     Uses the SDSS SkyServer Image Cutout service.
     Returns a PIL Image or None on failure.
     """
-    scale = 0.4  # arcsec/pixel – matches PS1 default of 0.25"/px at 240px
+    scale = 0.4  # arcsec/pixel
     url = (f"https://skyserver.sdss.org/dr17/SkyServerWS/ImgCutout/getjpeg"
            f"?ra={ra}&dec={dec}&scale={scale}&width={size}&height={size}")
     try:
