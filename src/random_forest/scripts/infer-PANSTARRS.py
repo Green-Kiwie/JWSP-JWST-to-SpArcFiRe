@@ -21,12 +21,12 @@ Usage:
         --output-dir <output directory> \\
         --[images]
 
-Example Usage:
-    python scripts/infer-PANSTARRS.py \\
-        --sparcfire-csv testing_data/SpArcFiRe_partial_PANSTARRS_overlap.csv \\
-        --gz2-csv testing_data/galaxy_zoo_2.csv \\
-        --model output/models/blurred_random_forest_models/150_110_1.pkl \\
-        --output-dir output/panstarrs_inference \\
+Example Usage (as single line):
+    python scripts/infer-PANSTARRS.py \
+        --sparcfire-csv testing_data/SpArcFiRe_outputs_testing.csv \
+        --gz2-csv testing_data/galaxy_zoo_2.csv \
+        --model output/models/blurred_random_forest_models/150_110_1.pkl \
+        --output-dir output/panstarrs_inference \
         --images
 
     The "--images" flag is optional and will download PANSTARRS thumbnails for each galaxy, so
@@ -461,13 +461,29 @@ def _ps1_geturl(ra: float, dec: float, size: int = 240,
     return url
 
 
+def _sdss_get_image(ra: float, dec: float, size: int = 240):
+    """Download an SDSS color cutout (used for Galaxy Zoo 2 imagery).
+
+    Uses the SDSS SkyServer Image Cutout service.
+    Returns a PIL Image or None on failure.
+    """
+    scale = 0.4  # arcsec/pixel – matches PS1 default of 0.25"/px at 240px
+    url = (f"https://skyserver.sdss.org/dr17/SkyServerWS/ImgCutout/getjpeg"
+           f"?ra={ra}&dec={dec}&scale={scale}&width={size}&height={size}")
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        return Image.open(BytesIO(resp.content)).convert('RGB')
+    except Exception:
+        return None
+
+
 def download_and_annotate_image(name: str, ra: float, dec: float,
                                 band: str, actual: float,
                                 predicted: float, output_path: str,
                                 size: int = 240, output_size: int = 240):
-    """Download a PANSTARRS cutout and annotate with spirality info.
-
-    The PNG file is named after the predicted spirality classification.
+    """Download PANSTARRS and SDSS (GZ2) cutouts side-by-side, annotated
+    with spirality info.  The PNG filename is the predicted spirality value.
     """
     try:
         url = _ps1_geturl(ra, dec, size=size, output_size=output_size,
@@ -480,15 +496,33 @@ def download_and_annotate_image(name: str, ra: float, dec: float,
         resp.raise_for_status()
         ps1_img = Image.open(BytesIO(resp.content)).convert('RGB')
     except Exception as e:
-        print(f"    Download failed for {name}: {e}")
+        print(f"    PS1 download failed for {name}: {e}")
         return False
 
-    # Create annotated figure
-    fig, ax = plt.subplots(figsize=(4, 5))
-    ax.imshow(np.array(ps1_img), origin='upper')
-    ax.set_title(name, fontsize=9, fontweight='bold')
-    ax.axis('off')
+    # ── Download SDSS / Galaxy Zoo 2 image ──
+    sdss_img = _sdss_get_image(ra, dec, size=output_size)
 
+    # ── Build side-by-side figure ──
+    has_sdss = sdss_img is not None
+    ncols = 2 if has_sdss else 1
+    fig, axes = plt.subplots(1, ncols, figsize=(4 * ncols, 5))
+    if ncols == 1:
+        axes = [axes]
+
+    # SDSS (GZ2) panel – left
+    if has_sdss:
+        axes[0].imshow(np.array(sdss_img), origin='upper')
+        axes[0].set_title('Galaxy Zoo 2 (SDSS)', fontsize=9, fontweight='bold')
+        axes[0].axis('off')
+
+    # PANSTARRS panel – right (or only)
+    ps1_ax = axes[1] if has_sdss else axes[0]
+    ps1_ax.imshow(np.array(ps1_img), origin='upper')
+    ps1_ax.set_title(f'PANSTARRS ({band}-band)', fontsize=9, fontweight='bold')
+    ps1_ax.axis('off')
+
+    # Annotation text
+    fig.suptitle(name, fontsize=10, fontweight='bold')
     text = (f"ACTUAL SPIRALITY: {actual:.4f}\n"
             f"PREDICTED SPIRALITY: {predicted:.4f}")
     fig.text(0.5, 0.02, text, ha='center', va='bottom', fontsize=8,
@@ -496,7 +530,7 @@ def download_and_annotate_image(name: str, ra: float, dec: float,
              bbox=dict(boxstyle='round,pad=0.4', facecolor='white',
                        alpha=0.9, edgecolor='gray'))
 
-    plt.tight_layout(rect=[0, 0.1, 1, 1])
+    plt.tight_layout(rect=[0, 0.1, 1, 0.93])
     plt.savefig(output_path, dpi=120, bbox_inches='tight',
                 facecolor='white')
     plt.close(fig)
