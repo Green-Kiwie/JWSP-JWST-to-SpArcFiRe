@@ -578,7 +578,7 @@ def process_single_fits(
     import sep_helpers as sh
     import sep_pjw as sep
     import numpy as np
-    from waveband_extraction import extract_waveband_from_filename
+    from waveband_extraction import extract_waveband_from_filename, is_imaging_mode
     from visualization import create_visualization
     
     error_message = None
@@ -617,6 +617,12 @@ def process_single_fits(
         
         # Extract waveband from filename
         waveband = extract_waveband_from_filename(filename)
+        
+        # Skip non-imaging observation modes (coronagraphic, WFSS, grism, weak lens, etc.)
+        if not is_imaging_mode(waveband):
+            if verbosity >= 1:
+                print(f"  Skipping non-imaging mode: {waveband}")
+            return file_size, 0, None
         
         # Compute NaN mask from original image before NaN filling
         # (get_main_fits_data already filled NaNs, so re-load raw data for the mask)
@@ -674,9 +680,15 @@ def process_single_fits(
         # Process each detected object
         for i, obj in enumerate(celestial_objects):
             cropped_data = sh._extract_object(obj, bkgless_data, padding=1.5, min_size=min_size, max_size=max_size, verbosity=0,
-                                              nan_mask=nan_mask)
+                                              nan_mask=nan_mask, max_nan_fraction=0.02)
             
             if cropped_data is None:
+                continue
+            
+            # Reject noise-dominated thumbnails (mostly static/high-frequency content)
+            if not sh.thumbnail_has_structure(cropped_data):
+                if verbosity >= 2:
+                    print(f"  Skipping noise-dominated thumbnail at ({int(obj['x'])},{int(obj['y'])})")
                 continue
             
             height, width = cropped_data.shape

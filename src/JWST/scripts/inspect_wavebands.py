@@ -14,11 +14,14 @@ Usage:
     python inspect_wavebands.py --n-thumbnails 25 --max-per-file 5 --cols 5
     python inspect_wavebands.py --no-galaxy-filter   # skip morphological filtering
 
-python inspect_wavebands.py \
-    --input-dir /extra/wayne2/preserve/nntran5/JWSP-JWST-to-SpArcFiRe/outputs/JWST_full_all_sky_output/ \
-    --output-dir /extra/wayne2/preserve/nntran5/JWSP-JWST-to-SpArcFiRe/outputs/waveband_inspection/ \
-    --n-thumbnails 50 \
-    --max-per-file 10
+    python inspect_wavebands.py \
+        --input-dir /extra/wayne2/preserve/nntran5/JWSP-JWST-to-SpArcFiRe/outputs/JWST_full_all_sky_output/ \
+        --output-dir /extra/wayne2/preserve/nntran5/JWSP-JWST-to-SpArcFiRe/outputs/waveband_inspection/ \
+        --n-thumbnails 50 \
+        --max-per-file 10
+
+    python inspect_wavebands.py --waveband f770w,f1000w,clear-f200w
+    python inspect_wavebands.py --waveband f770w 
 '''
 
 import os
@@ -34,7 +37,7 @@ import numpy as np
 # Add modules directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'modules'))
 
-from waveband_extraction import extract_waveband_from_filename, extract_instrument_from_filename
+from waveband_extraction import extract_waveband_from_filename, extract_instrument_from_filename, is_imaging_mode
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -47,7 +50,7 @@ MIN_SIZE = 20
 MAX_SIZE = 100
 PADDING = 1.5
 EDGE_MARGIN = 10
-MAX_NAN_FRACTION = 0.2
+MAX_NAN_FRACTION = 0.02
 PIXEL_STACK_LIMIT = 5_000_000
 SUB_OBJECT_LIMIT = 50_000
 
@@ -86,6 +89,7 @@ def scan_and_group_files(input_dir: str) -> dict:
 
 def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
                                   apply_galaxy_filter: bool = True,
+                                  min_thumb_size: int = 0,
                                   verbosity: int = 0) -> list:
     '''Extract galaxy thumbnails from a single all-sky FITS file.
     
@@ -100,6 +104,8 @@ def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
         filepath: Path to the all-sky FITS image
         max_thumbnails: Maximum number of thumbnails to return from this file
         apply_galaxy_filter: Whether to apply the 7-filter morphological pipeline
+        min_thumb_size: Minimum pixel dimension; crops where both width and height
+            are below this are skipped (0 = no filter)
         verbosity: 0=quiet, 1=summary, 2=verbose
     
     Returns:
@@ -195,7 +201,14 @@ def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
         )
 
         if cropped is not None:
-            thumbnails.append(cropped)
+            # Skip thumbnails smaller than the requested minimum
+            if min_thumb_size > 0:
+                h, w = cropped.shape
+                if h < min_thumb_size and w < min_thumb_size:
+                    continue
+            # Reject noise-dominated thumbnails (mostly static/high-frequency content)
+            if sh.thumbnail_has_structure(cropped):
+                thumbnails.append(cropped)
 
     return thumbnails
 
@@ -288,6 +301,13 @@ Examples:
                         help='Number of columns in the montage grid (default: 10)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility (default: 42)')
+    parser.add_argument('--waveband', type=str, default=None,
+                        help='Process only this waveband (e.g., "clear-f200w"). '
+                             'Comma-separated for multiple (e.g., "f770w,f1000w"). '
+                             'Case-insensitive. Matches against the full filter field.')
+    parser.add_argument('--min-thumb-size', type=int, default=0,
+                        help='Minimum thumbnail dimension (px). Crops where both width '
+                             'and height < this value are excluded from the grid (default: 0 = no filter)')
     parser.add_argument('--no-galaxy-filter', action='store_true',
                         help='Skip the 7-filter morphological galaxy pipeline')
     parser.add_argument('--include-subarrays', action='store_true',
@@ -311,6 +331,8 @@ Examples:
     print(f"Thumbnails/band : {args.n_thumbnails}")
     print(f"Max per file    : {args.max_per_file}")
     print(f"Galaxy filter   : {'ON (7-filter pipeline)' if apply_galaxy_filter else 'OFF (SEP + size only)'}")
+    print(f"Min thumb size  : {args.min_thumb_size}px" if args.min_thumb_size > 0 else "Min thumb size  : OFF")
+    print(f"Waveband filter : {args.waveband if args.waveband else 'ALL'}")
     print(f"Skip subarrays  : {'YES' if skip_subarrays else 'NO'}")
     print(f"Random seed     : {args.seed}")
     print()
@@ -336,6 +358,27 @@ Examples:
         if n_removed > 0:
             print(f"  Filtered out {n_removed} subarray/calibration groups (use --include-subarrays to keep them)")
         groups = filtered_groups
+
+    # Filter to specific waveband(s) if requested
+    if args.waveband:
+        requested = {w.strip().lower() for w in args.waveband.split(',')}
+        matched = {k: v for k, v in groups.items() if k[1].lower() in requested}
+        if not matched:
+            available = sorted({wb for (_, wb) in groups.keys()})
+            print(f"ERROR: No groups match waveband '{args.waveband}'.")
+            print(f"  Available wavebands: {', '.join(available[:30])}{'...' if len(available) > 30 else ''}")
+            sys.exit(1)
+        print(f"  Filtered to {len(matched)} group(s) matching: {args.waveband}")
+        groups = matched
+
+    # Filter out non-imaging observation modes (coronagraphic, WFSS, grism, weak lens, etc.)
+    non_imaging_groups = {k: v for k, v in groups.items() if not is_imaging_mode(k[1])}
+    if non_imaging_groups:
+        groups = {k: v for k, v in groups.items() if is_imaging_mode(k[1])}
+        print(f"  Filtered out {len(non_imaging_groups)} non-imaging groups "
+              f"(coronagraphic, WFSS, grism, weak lens):")
+        for (inst, wb) in sorted(non_imaging_groups.keys()):
+            print(f"    - {inst}_{wb} ({len(non_imaging_groups[(inst, wb)])} files)")
 
     if not groups:
         print("ERROR: No valid *_i2d.fits files found.")
@@ -390,6 +433,7 @@ Examples:
                     filepath,
                     max_thumbnails=max_from_this_file,
                     apply_galaxy_filter=apply_galaxy_filter,
+                    min_thumb_size=args.min_thumb_size,
                     verbosity=args.verbosity
                 )
                 collected_thumbnails.extend(thumbs)
