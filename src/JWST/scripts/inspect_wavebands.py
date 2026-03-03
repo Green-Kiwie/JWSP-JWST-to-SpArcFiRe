@@ -90,6 +90,7 @@ def scan_and_group_files(input_dir: str) -> dict:
 def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
                                   apply_galaxy_filter: bool = True,
                                   min_thumb_size: int = 0,
+                                  max_thumb_size: int = 0,
                                   verbosity: int = 0) -> list:
     '''Extract galaxy thumbnails from a single all-sky FITS file.
     
@@ -106,6 +107,8 @@ def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
         apply_galaxy_filter: Whether to apply the 7-filter morphological pipeline
         min_thumb_size: Minimum pixel dimension; crops where both width and height
             are below this are skipped (0 = no filter)
+        max_thumb_size: Maximum pixel dimension; crops where either width or height
+            exceeds this are skipped (0 = no filter)
         verbosity: 0=quiet, 1=summary, 2=verbose
     
     Returns:
@@ -201,11 +204,13 @@ def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
         )
 
         if cropped is not None:
+            h, w = cropped.shape
             # Skip thumbnails smaller than the requested minimum
-            if min_thumb_size > 0:
-                h, w = cropped.shape
-                if h < min_thumb_size and w < min_thumb_size:
-                    continue
+            if min_thumb_size > 0 and h < min_thumb_size and w < min_thumb_size:
+                continue
+            # Skip thumbnails larger than the requested maximum
+            if max_thumb_size > 0 and (h > max_thumb_size or w > max_thumb_size):
+                continue
             # Reject noise-dominated thumbnails (mostly static/high-frequency content)
             if sh.thumbnail_has_structure(cropped):
                 thumbnails.append(cropped)
@@ -308,6 +313,9 @@ Examples:
     parser.add_argument('--min-thumb-size', type=int, default=0,
                         help='Minimum thumbnail dimension (px). Crops where both width '
                              'and height < this value are excluded from the grid (default: 0 = no filter)')
+    parser.add_argument('--max-thumb-size', type=int, default=0,
+                        help='Maximum thumbnail dimension (px). Crops where either width '
+                             'or height > this value are excluded from the grid (default: 0 = no filter)')
     parser.add_argument('--no-galaxy-filter', action='store_true',
                         help='Skip the 7-filter morphological galaxy pipeline')
     parser.add_argument('--include-subarrays', action='store_true',
@@ -332,6 +340,7 @@ Examples:
     print(f"Max per file    : {args.max_per_file}")
     print(f"Galaxy filter   : {'ON (7-filter pipeline)' if apply_galaxy_filter else 'OFF (SEP + size only)'}")
     print(f"Min thumb size  : {args.min_thumb_size}px" if args.min_thumb_size > 0 else "Min thumb size  : OFF")
+    print(f"Max thumb size  : {args.max_thumb_size}px" if args.max_thumb_size > 0 else "Max thumb size  : OFF")
     print(f"Waveband filter : {args.waveband if args.waveband else 'ALL'}")
     print(f"Skip subarrays  : {'YES' if skip_subarrays else 'NO'}")
     print(f"Random seed     : {args.seed}")
@@ -434,6 +443,7 @@ Examples:
                     max_thumbnails=max_from_this_file,
                     apply_galaxy_filter=apply_galaxy_filter,
                     min_thumb_size=args.min_thumb_size,
+                    max_thumb_size=args.max_thumb_size,
                     verbosity=args.verbosity
                 )
                 collected_thumbnails.extend(thumbs)
