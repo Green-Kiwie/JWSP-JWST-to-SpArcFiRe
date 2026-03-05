@@ -2,23 +2,25 @@
 '''
 Plot the pixel-area distribution of FITS thumbnail cutouts on a log-scaled x-axis.
 
-Each thumbnail's pixel area (width × height) is computed and counted.  The result
-is a bar chart where the x-axis shows distinct pixel-area values on a log scale
-and the y-axis shows how many thumbnails fall under each value.
+Each thumbnail's pixel area (width × height) is computed and grouped into ~20
+logarithmically spaced bins spanning 400–10 000 px².  The result is a bar chart
+where the x-axis is log-scaled and the y-axis shows counts per bin.
+
+Uses raw binary FITS header parsing (no astropy) and multiprocessing for speed.
 
 Usage:
     python plot_dimension_distribution.py -i /path/to/fits/ -o distribution.png
     python plot_dimension_distribution.py -i /path/to/fits/ -o distribution.png --instrument NIRCAM
+    python plot_dimension_distribution.py -i /path/to/fits/ -o distribution.png -j 16
 '''
 
 import os
 import sys
 import glob
 import argparse
-from collections import Counter
+from multiprocessing import Pool, cpu_count
 
 import numpy as np
-from astropy.io import fits
 
 import matplotlib
 matplotlib.use('Agg')
@@ -26,30 +28,70 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import ScalarFormatter
 
 
-def read_thumbnail_info(path: str):
-    '''Read a single FITS thumbnail header and return (pixel_area, instrument).
+# ---------------------------------------------------------------------------
+# Fast raw FITS header reader — bypasses astropy entirely
+# ---------------------------------------------------------------------------
 
-    Only the primary header is read (no pixel data), which is significantly
-    faster when scanning thousands of files.
+_CARD_LEN = 80             # Each header card is 80 ASCII characters
+_MAX_HEADER_BYTES = 28800   # Read up to 10 blocks (~360 cards) — plenty for thumbnails
 
-    Returns:
-        Tuple of (int, str | None) on success, or None on failure.
+
+def _parse_header_value(card_bytes: bytes) -> str:
+    '''Extract the value portion from an 80-byte FITS header card.'''
+    raw = card_bytes[10:].decode('ascii', errors='replace')
+    if "'" in raw:
+        start = raw.index("'") + 1
+        end = raw.index("'", start)
+        return raw[start:end].strip()
+    else:
+        if '/' in raw:
+            raw = raw[:raw.index('/')]
+        return raw.strip()
+
+
+def read_thumbnail_info_fast(path: str):
+    '''Read NAXIS1, NAXIS2, INSTRUME from raw FITS binary header.
+
+    Only the first ~30 KB of the file is read — no full parsing, no astropy.
+    Returns (pixel_area, instrument_str_or_None) or None on error.
     '''
     try:
-        header = fits.getheader(path, 0)
-        naxis1 = header.get('NAXIS1')
-        naxis2 = header.get('NAXIS2')
-        if naxis1 is None or naxis2 is None:
-            print(f"  Warning: missing NAXIS dimensions in {os.path.basename(path)}")
-            return None
-        instrument = header.get('INSTRUME', None)
-        if instrument is not None:
-            instrument = str(instrument).strip()
-        return (int(naxis1) * int(naxis2), instrument)
-    except Exception as e:
-        print(f"  Warning: could not read {os.path.basename(path)}: {e}")
-    return None
+        with open(path, 'rb') as f:
+            header_bytes = f.read(_MAX_HEADER_BYTES)
 
+        naxis1 = None
+        naxis2 = None
+        instrument = None
+
+        for offset in range(0, len(header_bytes), _CARD_LEN):
+            card = header_bytes[offset:offset + _CARD_LEN]
+            if len(card) < _CARD_LEN:
+                break
+            keyword = card[:8].decode('ascii', errors='replace').rstrip()
+
+            if keyword == 'NAXIS1':
+                naxis1 = int(_parse_header_value(card))
+            elif keyword == 'NAXIS2':
+                naxis2 = int(_parse_header_value(card))
+            elif keyword == 'INSTRUME':
+                instrument = _parse_header_value(card)
+            elif keyword == 'END':
+                break
+
+            if naxis1 is not None and naxis2 is not None and instrument is not None:
+                break
+
+        if naxis1 is None or naxis2 is None:
+            return None
+
+        return (naxis1 * naxis2, instrument)
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
@@ -61,6 +103,8 @@ def main():
     parser.add_argument('-n', '--instrument', type=str, default=None,
                         help='Filter by JWST instrument (e.g. NIRCAM, NIRISS, MIRI). '
                              'Case-insensitive. If omitted, all files are included.')
+    parser.add_argument('-j', '--jobs', type=int, default=None,
+                        help='Number of parallel workers (default: all CPUs)')
     args = parser.parse_args()
 
     if not os.path.isdir(args.input):
@@ -72,101 +116,88 @@ def main():
         print(f"No .fits files found in {args.input}")
         sys.exit(1)
 
+    n_workers = args.jobs if args.jobs else cpu_count()
     instrument_filter = args.instrument.upper().strip() if args.instrument else None
+
+    print(f"Scanning {len(fits_files):,} files with {n_workers} workers ...")
 
     areas = []
     skipped_no_instrument = 0
     skipped_mismatch = 0
     errors = 0
+    processed = 0
 
-    for path in fits_files:
-        info = read_thumbnail_info(path)
-        if info is None:
-            errors += 1
-            continue
+    chunk_size = max(1, len(fits_files) // (n_workers * 4))
 
-        pixel_area, instrument = info
+    with Pool(processes=n_workers) as pool:
+        for result in pool.imap_unordered(read_thumbnail_info_fast, fits_files,
+                                          chunksize=chunk_size):
+            processed += 1
+            if processed % 100_000 == 0:
+                print(f"  ... {processed:,} / {len(fits_files):,}")
 
-        if instrument_filter is not None:
-            if instrument is None:
-                skipped_no_instrument += 1
-                continue
-            if instrument.upper() != instrument_filter:
-                skipped_mismatch += 1
+            if result is None:
+                errors += 1
                 continue
 
-        areas.append(pixel_area)
+            pixel_area, instrument = result
+
+            if instrument_filter is not None:
+                if instrument is None:
+                    skipped_no_instrument += 1
+                    continue
+                if instrument.upper() != instrument_filter:
+                    skipped_mismatch += 1
+                    continue
+
+            areas.append(pixel_area)
 
     # Console summary
-    print(f"Total .fits files scanned : {len(fits_files)}")
-    print(f"Matched thumbnails        : {len(areas)}")
+    print(f"\nTotal .fits files scanned : {len(fits_files):,}")
+    print(f"Matched thumbnails        : {len(areas):,}")
     if instrument_filter:
         print(f"Filtered by instrument    : {instrument_filter}")
-        print(f"  Skipped (no INSTRUME)   : {skipped_no_instrument}")
-        print(f"  Skipped (other instr.)  : {skipped_mismatch}")
+        print(f"  Skipped (no INSTRUME)   : {skipped_no_instrument:,}")
+        print(f"  Skipped (other instr.)  : {skipped_mismatch:,}")
     if errors:
-        print(f"  Unreadable files        : {errors}")
+        print(f"  Unreadable files        : {errors:,}")
 
     if not areas:
         print("No thumbnails matched the criteria. No plot generated.")
         sys.exit(0)
 
-    counter = Counter(areas)
-    unique_areas = sorted(counter.keys())
-    counts = [counter[a] for a in unique_areas]
+    # Log-spaced binning
+    n_bins = 20
+    areas_arr = np.array(areas, dtype=float)
+    bin_edges = np.logspace(np.log10(400), np.log10(10000), n_bins + 1)
+    counts, _ = np.histogram(areas_arr, bins=bin_edges)
+    bin_centers = np.sqrt(bin_edges[:-1] * bin_edges[1:])
 
-    print(f"\nPixel-area breakdown ({len(unique_areas)} distinct values):")
-    for area, count in zip(unique_areas, counts):
-        print(f"  {area:>6d} px²  —  {count} galaxies")
+    print(f"\nPixel-area distribution ({n_bins} log-spaced bins):")
+    for i in range(n_bins):
+        lo, hi = int(round(bin_edges[i])), int(round(bin_edges[i + 1]))
+        print(f"  {lo:>5d} – {hi:>5d} px²  —  {counts[i]:,} galaxies")
 
     # Plot
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.bar([str(a) for a in unique_areas], counts, color='steelblue', edgecolor='black',
-           linewidth=0.4)
-
-    ax.set_xlabel('Pixel Area (width × height)', fontsize=12)
-    ax.set_ylabel('Galaxy Count', fontsize=12)
 
     title = 'Thumbnail Pixel-Area Distribution'
     if instrument_filter:
         title += f' — {instrument_filter}'
-    ax.set_title(title, fontsize=14)
 
-    ax.tick_params(axis='x', labelrotation=45, labelsize=8)
-    ax.tick_params(axis='y', labelsize=10)
-
-    # Since the user wants a log-scale x-axis and the values are discrete,
-    # we position bars at their true log-spaced locations instead of evenly.
-    ax.cla()  # clear the categorical bars — replot with numeric positions
-
-    bar_positions = np.array(unique_areas, dtype=float)
-    # Compute bar widths that look reasonable on a log scale
-    log_positions = np.log10(bar_positions)
-    if len(log_positions) > 1:
-        diffs = np.diff(log_positions)
-        min_diff = diffs.min()
-        bar_width_factor = 0.8 * min_diff
-    else:
-        bar_width_factor = 0.05
-
-    # Width of each bar in log-space, converted back to linear for plotting
-    widths = bar_positions * (10**bar_width_factor - 1) * 0.9
-
-    ax.bar(bar_positions, counts, width=widths, color='steelblue', edgecolor='black',
-           linewidth=0.4, align='center')
+    widths = np.diff(bin_edges)
+    ax.bar(bin_edges[:-1], counts, width=widths, align='edge',
+           color='steelblue', edgecolor='black', linewidth=0.5)
     ax.set_xscale('log')
-    ax.set_xlim(300, 12000)
+    ax.set_xlim(350, 11000)
 
-    # Format x-ticks as plain integers
     ax.xaxis.set_major_formatter(ScalarFormatter())
     ax.xaxis.get_major_formatter().set_scientific(False)
     ax.xaxis.get_major_formatter().set_useOffset(False)
 
-    # Add minor tick labels at all unique areas
-    ax.set_xticks(unique_areas, minor=True)
-    ax.set_xticklabels([str(a) for a in unique_areas], minor=True, fontsize=6, rotation=45)
-    ax.tick_params(axis='x', which='minor', length=3)
-    ax.tick_params(axis='x', which='major', length=5)
+    tick_labels = [int(round(e)) for e in bin_edges]
+    ax.set_xticks(bin_edges)
+    ax.set_xticklabels(tick_labels, fontsize=7, rotation=45)
 
     ax.set_xlabel('Pixel Area (width × height)', fontsize=12)
     ax.set_ylabel('Galaxy Count', fontsize=12)
@@ -174,7 +205,6 @@ def main():
 
     fig.tight_layout()
 
-    # Ensure output directory exists
     out_dir = os.path.dirname(args.output)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)

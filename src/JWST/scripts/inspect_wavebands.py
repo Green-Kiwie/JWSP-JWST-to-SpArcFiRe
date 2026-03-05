@@ -170,9 +170,28 @@ def extract_thumbnails_from_file(filepath: str, max_thumbnails: int,
     if apply_galaxy_filter and len(celestial_objects) > 0:
         try:
             bkg_rms_val = sep.Background(image_data).globalrms
+            
+            # Derive instrument + pixel scale for PSF-adaptive filtering
+            from waveband_extraction import extract_instrument_from_filename as _extract_inst
+            _instrument = _extract_inst(filename)
+            _pixel_scale = None
+            try:
+                _meta = sh.get_relevant_fits_meta_data(filepath)
+                _pixar = _meta.get('PIXAR_A2')
+                if _pixar is not None:
+                    _val = _pixar[0] if isinstance(_pixar, (tuple, list)) else _pixar
+                    if _val and float(_val) > 0:
+                        import math as _math
+                        _pixel_scale = _math.sqrt(float(_val))
+            except Exception:
+                pass
+            
+            _waveband = extract_waveband_from_filename(filename)
             celestial_objects = sh.filter_galaxies(
                 bkgless_data, celestial_objects, bkg_rms_val,
-                verbosity=verbosity
+                verbosity=verbosity,
+                instrument=_instrument, waveband=_waveband,
+                pixel_scale_arcsec=_pixel_scale
             )
         except Exception as e:
             if verbosity >= 1:

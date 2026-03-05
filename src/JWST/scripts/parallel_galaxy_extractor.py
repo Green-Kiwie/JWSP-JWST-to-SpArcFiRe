@@ -28,6 +28,7 @@ import os
 import sys
 import glob
 import time
+import math
 import hashlib
 import argparse
 import json
@@ -578,7 +579,7 @@ def process_single_fits(
     import sep_helpers as sh
     import sep_pjw as sep
     import numpy as np
-    from waveband_extraction import extract_waveband_from_filename, is_imaging_mode
+    from waveband_extraction import extract_waveband_from_filename, extract_instrument_from_filename, is_imaging_mode
     from visualization import create_visualization
     
     error_message = None
@@ -617,6 +618,18 @@ def process_single_fits(
         
         # Extract waveband from filename
         waveband = extract_waveband_from_filename(filename)
+        instrument = extract_instrument_from_filename(filename)
+        
+        # Derive pixel scale (arcsec/pixel) from FITS metadata for PSF-adaptive filtering
+        pixel_scale_arcsec = None
+        try:
+            pixar_a2 = image_meta_data.get('PIXAR_A2')
+            if pixar_a2 is not None:
+                val = pixar_a2[0] if isinstance(pixar_a2, (tuple, list)) else pixar_a2
+                if val and float(val) > 0:
+                    pixel_scale_arcsec = math.sqrt(float(val))
+        except Exception:
+            pass
         
         # Skip non-imaging observation modes (coronagraphic, WFSS, grism, weak lens, etc.)
         if not is_imaging_mode(waveband):
@@ -658,7 +671,9 @@ def process_single_fits(
                 bkg_rms_val = sep.Background(image_data).globalrms
                 celestial_objects = sh.filter_galaxies(
                     bkgless_data, celestial_objects, bkg_rms_val,
-                    verbosity=verbosity
+                    verbosity=verbosity,
+                    instrument=instrument, waveband=waveband,
+                    pixel_scale_arcsec=pixel_scale_arcsec
                 )
             except Exception as e:
                 if verbosity >= 1:
