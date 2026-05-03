@@ -27,6 +27,7 @@ from astroquery.mast.missions import MastMissions
 
 DEFAULT_OUTPUT_FILE = Path(__file__).resolve().parents[1] / "inputs" / "jwst_L3_sky_patches.csv"
 DEFAULT_BATCH_SIZE = 500
+DEFAULT_PRODUCT_BATCH_SIZE = 100
 DEFAULT_SLEEP_SECONDS = 5.0
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_MAX_BATCHES = None
@@ -39,6 +40,16 @@ JWST_EXP_TYPES = (
     "NRC_IMAGE,NIS_IMAGE,NRS_IFU,NRS_IMAGE,NRS_MIMF,NRS_MSATA,"
     "NRS_TACONFIRM,NRS_WATA"
 )
+OBSERVATION_SELECT_COLUMNS = [
+    "fileSetName",
+    "targprop",
+    "instrume",
+    "exp_type",
+    "program",
+    "access",
+    "productLevel",
+    "opticalElements",
+]
 OUTPUT_COLUMNS = [
     "dataURI",
     "productFilename",
@@ -73,12 +84,12 @@ COLUMN_ALIASES = {
 }
 
 
-def build_query_kwargs() -> dict:
+def build_query_kwargs(instruments: str = JWST_INSTRUMENTS) -> dict:
     """Return the portal-aligned query parameters for the JWST missions API."""
     return {
-        "select_cols": [],
+        "select_cols": OBSERVATION_SELECT_COLUMNS,
         "exp_type": JWST_EXP_TYPES,
-        "instrume": JWST_INSTRUMENTS,
+        "instrume": instruments,
         "productLevel": "3",
     }
 
@@ -92,6 +103,36 @@ def _to_dataframe(result) -> pd.DataFrame:
     if hasattr(result, "to_pandas"):
         return result.to_pandas()
     return pd.DataFrame(result)
+
+
+def _iter_result_chunks(result, chunk_size: int):
+    """Yield row-preserving chunks from an astroquery table, DataFrame, or list-like result."""
+    if result is None:
+        return
+
+    total_rows = len(result)
+    for start in range(0, total_rows, chunk_size):
+        stop = start + chunk_size
+        if isinstance(result, pd.DataFrame):
+            yield result.iloc[start:stop]
+        else:
+            yield result[start:stop]
+
+
+def _get_product_list_in_chunks(query_client: Any, datasets, product_batch_size: int) -> tuple[pd.DataFrame, int]:
+    """Fetch product rows in smaller slices for astroquery versions without batch-size support."""
+    product_frames = []
+    chunk_count = 0
+
+    for dataset_chunk in _iter_result_chunks(datasets, product_batch_size):
+        chunk_count += 1
+        raw_product_chunk = query_client.get_product_list(dataset_chunk)
+        product_frames.append(_to_dataframe(raw_product_chunk))
+
+    if not product_frames:
+        return pd.DataFrame(), chunk_count
+
+    return pd.concat(product_frames, ignore_index=True, sort=False), chunk_count
 
 
 def _coalesce_column(frame: pd.DataFrame, aliases: Iterable[str]) -> pd.Series:
@@ -200,10 +241,45 @@ def normalize_query_results(frame: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
+def merge_manifest_files(
+    input_files: Iterable[str | Path],
+    output_file: str | Path = DEFAULT_OUTPUT_FILE,
+    logger: Callable[[str], None] = print,
+) -> int:
+    """Merge shard manifests into one deterministic downloader-compatible CSV."""
+    frames = []
+    input_paths = [Path(path) for path in input_files]
+
+    for input_path in input_paths:
+        frame = pd.read_csv(input_path)
+        missing_columns = [column for column in OUTPUT_COLUMNS if column not in frame.columns]
+        if missing_columns:
+            missing_text = ", ".join(missing_columns)
+            raise ValueError(f"Manifest {input_path} is missing required columns: {missing_text}")
+        frames.append(frame[OUTPUT_COLUMNS])
+
+    if frames:
+        merged = pd.concat(frames, ignore_index=True, sort=False)
+        merged = merged.drop_duplicates(subset=["productFilename"])
+        merged = merged.sort_values("productFilename").reset_index(drop=True)
+    else:
+        merged = pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(output_path, index=False)
+    logger(
+        f"Merged {len(input_paths)} manifest file(s) into {output_path} with {len(merged)} sky mosaic rows."
+    )
+    return len(merged)
+
+
 def export_sky_patch_manifest(
     query_client: Any,
     output_file: str | Path = DEFAULT_OUTPUT_FILE,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    product_batch_size: int = DEFAULT_PRODUCT_BATCH_SIZE,
+    instruments: str = JWST_INSTRUMENTS,
     sleep_seconds: float = DEFAULT_SLEEP_SECONDS,
     max_retries: int = DEFAULT_MAX_RETRIES,
     max_batches: int | None = DEFAULT_MAX_BATCHES,
@@ -212,6 +288,8 @@ def export_sky_patch_manifest(
     """Query MAST in pages and write the normalized sky patch manifest CSV."""
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
+    if product_batch_size < 1:
+        raise ValueError("product_batch_size must be at least 1")
     if max_retries < 1:
         raise ValueError("max_retries must be at least 1")
     if max_batches is not None and max_batches < 1:
@@ -222,7 +300,7 @@ def export_sky_patch_manifest(
     if output_path.exists():
         output_path.unlink()
 
-    query_kwargs = build_query_kwargs()
+    query_kwargs = build_query_kwargs(instruments=instruments)
     offset = 0
     batch_number = 0
     total_observation_rows = 0
@@ -232,13 +310,17 @@ def export_sky_patch_manifest(
 
     logger(
         "Querying MAST JWST missions API for Level-3 products "
-        f"({query_kwargs['instrume']}; productLevel={query_kwargs['productLevel']})"
+        f"({query_kwargs['instrume']}; productLevel={query_kwargs['productLevel']}; "
+        f"observationBatch={batch_size}; productBatch={product_batch_size})"
     )
 
     while True:
         observation_frame = None
         raw_observation_batch = None
+        observation_query_start = time.perf_counter()
+        observation_attempts = 0
         for attempt in range(1, max_retries + 1):
+            observation_attempts = attempt
             try:
                 raw_observation_batch = query_client.query_criteria(
                     limit=batch_size,
@@ -255,6 +337,7 @@ def export_sky_patch_manifest(
                     f"Retrying in {sleep_seconds:.1f}s..."
                 )
                 time.sleep(sleep_seconds)
+        observation_query_seconds = time.perf_counter() - observation_query_start
 
         if observation_frame is None or observation_frame.empty:
             break
@@ -264,10 +347,17 @@ def export_sky_patch_manifest(
         total_observation_rows += observation_row_count
 
         product_frame = None
+        product_query_start = time.perf_counter()
+        product_attempts = 0
+        product_chunk_count = 0
         for attempt in range(1, max_retries + 1):
+            product_attempts = attempt
             try:
-                raw_product_batch = query_client.get_product_list(raw_observation_batch)
-                product_frame = _to_dataframe(raw_product_batch)
+                product_frame, product_chunk_count = _get_product_list_in_chunks(
+                    query_client,
+                    raw_observation_batch,
+                    product_batch_size,
+                )
                 break
             except Exception as exc:
                 if attempt >= max_retries:
@@ -277,6 +367,7 @@ def export_sky_patch_manifest(
                     f"Retrying in {sleep_seconds:.1f}s..."
                 )
                 time.sleep(sleep_seconds)
+        product_query_seconds = time.perf_counter() - product_query_start
 
         if product_frame is None:
             product_frame = pd.DataFrame()
@@ -284,24 +375,32 @@ def export_sky_patch_manifest(
         product_row_count = len(product_frame)
         total_product_rows += product_row_count
 
+        normalize_start = time.perf_counter()
         enriched_product_frame = enrich_product_results(product_frame, observation_frame)
         normalized_batch = normalize_query_results(enriched_product_frame)
+        normalize_seconds = time.perf_counter() - normalize_start
         kept_row_count = len(normalized_batch)
 
+        write_seconds = 0.0
         if kept_row_count:
+            write_start = time.perf_counter()
             normalized_batch.to_csv(
                 output_path,
                 mode="a" if wrote_any_rows else "w",
                 header=not wrote_any_rows,
                 index=False,
             )
+            write_seconds = time.perf_counter() - write_start
             wrote_any_rows = True
             total_written_rows += kept_row_count
 
         logger(
             f"Processed batch {batch_number}: {observation_row_count} observation rows, "
             f"{product_row_count} product rows, "
-            f"{kept_row_count} sky mosaics kept (offset {offset})."
+            f"{kept_row_count} sky mosaics kept (offset {offset}; "
+            f"obs_query={observation_query_seconds:.1f}s/{observation_attempts} attempt(s), "
+            f"product_query={product_query_seconds:.1f}s/{product_attempts} attempt(s) across {product_chunk_count} chunk(s), "
+            f"normalize={normalize_seconds:.1f}s, write={write_seconds:.1f}s)."
         )
         if batch_number == 1 and product_row_count > 0 and kept_row_count == 0:
             diagnostic = {
@@ -345,10 +444,33 @@ def parse_args() -> argparse.Namespace:
         help=f"Output CSV path (default: {DEFAULT_OUTPUT_FILE})",
     )
     parser.add_argument(
+        "--merge-inputs",
+        nargs="+",
+        type=Path,
+        help="Existing manifest CSVs to merge instead of querying MAST.",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
         help=f"Rows to request per missions API page (default: {DEFAULT_BATCH_SIZE})",
+    )
+    parser.add_argument(
+        "--product-batch-size",
+        type=int,
+        default=DEFAULT_PRODUCT_BATCH_SIZE,
+        help=(
+            "Datasets to send per product-list request inside each observation page "
+            f"(default: {DEFAULT_PRODUCT_BATCH_SIZE})"
+        ),
+    )
+    parser.add_argument(
+        "--instruments",
+        default=JWST_INSTRUMENTS,
+        help=(
+            "Comma-separated JWST instrument list for query sharding "
+            f"(default: {JWST_INSTRUMENTS})"
+        ),
     )
     parser.add_argument(
         "--sleep-seconds",
@@ -374,11 +496,18 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     """CLI entry point."""
     args = parse_args()
+
+    if args.merge_inputs:
+        merge_manifest_files(args.merge_inputs, output_file=args.output)
+        return 0
+
     missions = MastMissions(mission=JWST_MISSION)
     export_sky_patch_manifest(
         missions,
         output_file=args.output,
         batch_size=args.batch_size,
+        product_batch_size=args.product_batch_size,
+        instruments=args.instruments,
         sleep_seconds=args.sleep_seconds,
         max_retries=args.max_retries,
         max_batches=args.max_batches,

@@ -36,10 +36,16 @@ class DownloadMastPatchIdsTests(unittest.TestCase):
     def test_build_query_kwargs_matches_portal_filters(self):
         query_kwargs = MODULE.build_query_kwargs()
 
-        self.assertEqual(query_kwargs["select_cols"], [])
+        self.assertEqual(query_kwargs["select_cols"], MODULE.OBSERVATION_SELECT_COLUMNS)
         self.assertEqual(query_kwargs["productLevel"], "3")
         self.assertEqual(query_kwargs["instrume"], MODULE.JWST_INSTRUMENTS)
         self.assertEqual(query_kwargs["exp_type"], MODULE.JWST_EXP_TYPES)
+
+    def test_build_query_kwargs_accepts_instrument_override(self):
+        query_kwargs = MODULE.build_query_kwargs(instruments="NIRCAM")
+
+        self.assertEqual(query_kwargs["instrume"], "NIRCAM")
+        self.assertEqual(query_kwargs["productLevel"], "3")
 
     def test_normalize_query_results_keeps_only_level3_i2d_images(self):
         frame = pd.DataFrame(
@@ -235,8 +241,182 @@ class DownloadMastPatchIdsTests(unittest.TestCase):
         self.assertEqual(fake_client.query_calls[1]["offset"], 2)
         self.assertEqual(fake_client.query_calls[2]["offset"], 3)
         self.assertEqual(len(fake_client.product_calls), 2)
+        self.assertEqual(len(fake_client.product_calls[0]), 2)
         self.assertTrue(any("Processed batch 1" in message for message in log_messages))
         self.assertTrue(any("Complete." in message for message in log_messages))
+
+    def test_export_sky_patch_manifest_chunks_product_queries(self):
+        observation_batch = pd.DataFrame(
+            [
+                {
+                    "ArchiveFileID": "obs-1",
+                    "fileSetName": "obs-1",
+                    "productLevel": "3",
+                    "instrume": "NIRCAM",
+                    "exp_type": "NRC_IMAGE",
+                    "program": "1001",
+                    "targprop": "target-1",
+                    "access": "PUBLIC",
+                },
+                {
+                    "ArchiveFileID": "obs-2",
+                    "fileSetName": "obs-2",
+                    "productLevel": "3",
+                    "instrume": "NIRCAM",
+                    "exp_type": "NRC_IMAGE",
+                    "program": "1002",
+                    "targprop": "target-2",
+                    "access": "PUBLIC",
+                },
+                {
+                    "ArchiveFileID": "obs-3",
+                    "fileSetName": "obs-3",
+                    "productLevel": "3",
+                    "instrume": "NIRCAM",
+                    "exp_type": "NRC_IMAGE",
+                    "program": "1003",
+                    "targprop": "target-3",
+                    "access": "PUBLIC",
+                }
+            ]
+        )
+        first_product_batch = pd.DataFrame(
+            [
+                {
+                    "filename": "jw_first_i2d.fits",
+                    "dataset": "obs-1",
+                    "uri": "mast:JWST/product/jw_first_i2d.fits",
+                    "instrument_name": "NIRCAM",
+                    "access": "PUBLIC",
+                },
+                {
+                    "filename": "jw_second_i2d.fits",
+                    "dataset": "obs-2",
+                    "uri": "mast:JWST/product/jw_second_i2d.fits",
+                    "instrument_name": "NIRCAM",
+                    "access": "PUBLIC",
+                },
+            ]
+        )
+        second_product_batch = pd.DataFrame(
+            [
+                {
+                    "filename": "jw_third_i2d.fits",
+                    "dataset": "obs-3",
+                    "uri": "mast:JWST/product/jw_third_i2d.fits",
+                    "instrument_name": "NIRCAM",
+                    "access": "PUBLIC",
+                }
+            ]
+        )
+        fake_client = FakeMastMissions(
+            [observation_batch, pd.DataFrame()],
+            [first_product_batch, second_product_batch],
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "jwst_L3_sky_patches.csv"
+            MODULE.export_sky_patch_manifest(
+                fake_client,
+                output_file=output_path,
+                batch_size=3,
+                product_batch_size=2,
+                sleep_seconds=0,
+                max_retries=1,
+                logger=lambda _message: None,
+            )
+
+        self.assertEqual(len(fake_client.product_calls), 2)
+        self.assertEqual(len(fake_client.product_calls[0]), 2)
+        self.assertEqual(len(fake_client.product_calls[1]), 1)
+
+    def test_merge_manifest_files_dedupes_and_sorts(self):
+        first_manifest = pd.DataFrame(
+            [
+                {
+                    "dataURI": "mast:JWST/product/jw_b_i2d.fits",
+                    "productFilename": "jw_b_i2d.fits",
+                    "obsID": "obs-b",
+                    "target_name": "target-b",
+                    "obs_collection": "JWST",
+                    "calib_level": "3",
+                    "productType": "science",
+                    "dataproduct_type": "image",
+                    "instrume": "NIRCAM",
+                    "exp_type": "NRC_IMAGE",
+                    "filters": "F200W",
+                    "proposal_id": "1002",
+                    "size": 2,
+                    "dataRights": "PUBLIC",
+                },
+                {
+                    "dataURI": "mast:JWST/product/jw_a_i2d.fits",
+                    "productFilename": "jw_a_i2d.fits",
+                    "obsID": "obs-a",
+                    "target_name": "target-a",
+                    "obs_collection": "JWST",
+                    "calib_level": "3",
+                    "productType": "science",
+                    "dataproduct_type": "image",
+                    "instrume": "NIRCAM",
+                    "exp_type": "NRC_IMAGE",
+                    "filters": "F150W",
+                    "proposal_id": "1001",
+                    "size": 1,
+                    "dataRights": "PUBLIC",
+                },
+            ]
+        )
+        second_manifest = pd.DataFrame(
+            [
+                {
+                    "dataURI": "mast:JWST/product/jw_b_i2d.fits",
+                    "productFilename": "jw_b_i2d.fits",
+                    "obsID": "obs-b-duplicate",
+                    "target_name": "target-b-duplicate",
+                    "obs_collection": "JWST",
+                    "calib_level": "3",
+                    "productType": "science",
+                    "dataproduct_type": "image",
+                    "instrume": "NIRISS",
+                    "exp_type": "NIS_IMAGE",
+                    "filters": "F200W",
+                    "proposal_id": "2002",
+                    "size": 2,
+                    "dataRights": "PUBLIC",
+                },
+                {
+                    "dataURI": "mast:JWST/product/jw_c_i2d.fits",
+                    "productFilename": "jw_c_i2d.fits",
+                    "obsID": "obs-c",
+                    "target_name": "target-c",
+                    "obs_collection": "JWST",
+                    "calib_level": "3",
+                    "productType": "science",
+                    "dataproduct_type": "image",
+                    "instrume": "NIRISS",
+                    "exp_type": "NIS_IMAGE",
+                    "filters": "F090W",
+                    "proposal_id": "2003",
+                    "size": 3,
+                    "dataRights": "PUBLIC",
+                },
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            first_path = tmpdir_path / "first.csv"
+            second_path = tmpdir_path / "second.csv"
+            output_path = tmpdir_path / "merged.csv"
+            first_manifest.to_csv(first_path, index=False)
+            second_manifest.to_csv(second_path, index=False)
+
+            written_rows = MODULE.merge_manifest_files([first_path, second_path], output_file=output_path)
+            merged = pd.read_csv(output_path)
+
+        self.assertEqual(written_rows, 3)
+        self.assertEqual(list(merged["productFilename"]), ["jw_a_i2d.fits", "jw_b_i2d.fits", "jw_c_i2d.fits"])
 
 
 if __name__ == "__main__":
