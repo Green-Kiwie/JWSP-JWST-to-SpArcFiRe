@@ -5,3 +5,4 @@ scripts/archive/
 data/
 archive/
 .venv
+extraction/

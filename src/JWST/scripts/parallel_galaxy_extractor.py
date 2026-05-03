@@ -550,6 +550,7 @@ def build_thumbnail_output_path(
     output_dir: str,
     canonical_ra: float,
     canonical_dec: float,
+    instrument: Optional[str],
     waveband: str,
     version: int,
     instance_id: int,
@@ -572,7 +573,9 @@ def build_thumbnail_output_path(
 
     canonical_ra_key = round_coordinate(canonical_ra, decimals=6)
     canonical_dec_key = round_coordinate(canonical_dec, decimals=6)
-    output_filename = f"{canonical_ra_key:.6f}_{canonical_dec_key:.6f}_{waveband}_v{version}.fits"
+    instrument_prefix = f"{instrument.lower()}_" if instrument else ""
+    band_label = f"{instrument_prefix}{waveband}"
+    output_filename = f"{canonical_ra_key:.6f}_{canonical_dec_key:.6f}_{band_label}_v{version}.fits"
 
     shard_number = ((instance_id - 1) // thumbnails_per_dir) + 1
     shard_dir = os.path.join(output_dir, str(shard_number))
@@ -842,6 +845,7 @@ def process_single_fits(
                     output_dir,
                     canonical_ra,
                     canonical_dec,
+                    instrument,
                     waveband,
                     version,
                     instance_id,

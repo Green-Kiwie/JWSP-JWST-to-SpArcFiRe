@@ -11,12 +11,32 @@ SPEC.loader.exec_module(MODULE)
 
 
 class ParallelGalaxyExtractorTests(unittest.TestCase):
+    def test_build_thumbnail_output_path_prefixes_instrument_when_present(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filename, output_path = MODULE.build_thumbnail_output_path(
+                tmpdir,
+                80.483566,
+                -69.482915,
+                "nircam",
+                "clear-f070w",
+                1,
+                1,
+                10000,
+            )
+
+            self.assertEqual(
+                filename,
+                "80.483566_-69.482915_nircam_clear-f070w_v1.fits",
+            )
+            self.assertEqual(Path(output_path).name, filename)
+
     def test_build_thumbnail_output_path_keeps_boundary_instance_in_first_shard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             filename, output_path = MODULE.build_thumbnail_output_path(
                 tmpdir,
                 10.0,
                 20.0,
+                None,
                 "f200w",
                 10000,
                 10000,
@@ -33,6 +53,7 @@ class ParallelGalaxyExtractorTests(unittest.TestCase):
                 tmpdir,
                 10.0,
                 20.0,
+                None,
                 "f200w",
                 10001,
                 10001,
@@ -49,6 +70,7 @@ class ParallelGalaxyExtractorTests(unittest.TestCase):
                 "/tmp",
                 10.0,
                 20.0,
+                None,
                 "f200w",
                 1,
                 1,
