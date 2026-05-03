@@ -3,20 +3,22 @@
 Parallel Galaxy Extractor for JWST FITS Files
 
 This script processes JWST FITS files in parallel, extracting galaxies using SEP
-and grouping them by coordinates across different wavebands.
+and grouping them by coordinates across different wavebands. Cropped FITS
+thumbnails are sharded into numbered output subdirectories so the output root
+does not become one massive flat directory.
 
 Usage examples:
     # Run with 7 workers (recommended for long-running processes)
-    python parallel_galaxy_extractor.py \ 
-        --num-workers 7 \ 
-        --input output \ 
+    python parallel_galaxy_extractor.py \
+        --num-workers 7 \
+        --input output \
         --output count \
-        --db-path count.db \ 
-        --queue-dir count_queue \ 
-        --stats-dir count_stats \ 
-        --min-size 20 \ 
-        --max-size 100 \ 
-        --verbosity 1 \ 
+        --db-path count.db \
+        --queue-dir count_queue \
+        --stats-dir count_stats \
+        --min-size 20 \
+        --max-size 100 \
+        --verbosity 1 \
         --mode scan-only
 
     (one liner example) 
@@ -544,18 +546,54 @@ class ProcessingStats:
             print(f"Warning: Failed to save stats: {e}")
 
 
+def build_thumbnail_output_path(
+    output_dir: str,
+    canonical_ra: float,
+    canonical_dec: float,
+    waveband: str,
+    version: int,
+    instance_id: int,
+    thumbnails_per_dir: int,
+) -> Tuple[str, str]:
+    '''Build the sharded output path for a saved thumbnail.
+
+    Thumbnails are stored in numbered subdirectories so the output root does
+    not accumulate millions of entries in one flat directory.
+
+    Returns:
+        Tuple of (output_filename, output_path)
+    '''
+    from galaxy_naming import round_coordinate
+
+    if thumbnails_per_dir < 1:
+        raise ValueError("thumbnails_per_dir must be at least 1")
+    if instance_id < 1:
+        raise ValueError("instance_id must be at least 1")
+
+    canonical_ra_key = round_coordinate(canonical_ra, decimals=6)
+    canonical_dec_key = round_coordinate(canonical_dec, decimals=6)
+    output_filename = f"{canonical_ra_key:.6f}_{canonical_dec_key:.6f}_{waveband}_v{version}.fits"
+
+    shard_number = ((instance_id - 1) // thumbnails_per_dir) + 1
+    shard_dir = os.path.join(output_dir, str(shard_number))
+    os.makedirs(shard_dir, exist_ok=True)
+
+    return output_filename, os.path.join(shard_dir, output_filename)
+
+
 def process_single_fits(
     filepath: str,
     output_dir: str,
     db: CoordinateDatabase,
     min_size: int = 20,
-    max_size: int = 100,
+    max_size: int = 200,
     verbosity: int = 1,
     mode: str = 'full',
     visualize_crops: bool = False,
     viz_output_dir: Optional[str] = None,
-    detection_threshold: float = 3.0,
-    apply_galaxy_filter: bool = True
+    detection_threshold: float = 5.0,
+    apply_galaxy_filter: bool = True,
+    thumbnails_per_dir: int = 10000,
 ) -> Tuple[int, int, Optional[str]]:
     '''Process a single FITS file with comprehensive error handling.
     
@@ -569,8 +607,9 @@ def process_single_fits(
         mode: Processing mode ('full'=scan+crop, 'scan-only'=db only, 'crop-only'=use existing db)
         visualize_crops: Whether to generate visualization PNG
         viz_output_dir: Directory for visualization PNG files
-        detection_threshold: SEP detection threshold in sigma (default: 3.0)
+        detection_threshold: SEP detection threshold in sigma (default: 5.0)
         apply_galaxy_filter: Whether to apply morphological galaxy filtering (default: True)
+        thumbnails_per_dir: Maximum thumbnails per numbered output subdirectory
     
     Returns:
         Tuple of (file_size, galaxies_extracted, error_message or None)
@@ -666,7 +705,8 @@ def process_single_fits(
             print(f"{len(celestial_objects)} raw detections.")
         
         # Apply galaxy filtering to remove stars, noise, and artifacts
-        if apply_galaxy_filter and len(celestial_objects) > 0:
+        n_before_filter = len(celestial_objects)
+        if apply_galaxy_filter and n_before_filter > 0:
             try:
                 bkg_rms_val = sep.Background(image_data).globalrms
                 celestial_objects = sh.filter_galaxies(
@@ -675,9 +715,13 @@ def process_single_fits(
                     instrument=instrument, waveband=waveband,
                     pixel_scale_arcsec=pixel_scale_arcsec
                 )
+            except MemoryError:
+                raise
             except Exception as e:
-                if verbosity >= 1:
-                    print(f"  Warning: Galaxy filter failed ({e}), using unfiltered detections")
+                print(f"  ERROR: Galaxy filter failed ({type(e).__name__}: {e}), using unfiltered detections")
+                traceback.print_exc()
+        elif not apply_galaxy_filter and verbosity >= 1:
+            print(f"  Galaxy filter disabled, passing all {n_before_filter} detections")
         
         if verbosity >= 1:
             print(f"{len(celestial_objects)} objects after filtering.")
@@ -694,7 +738,7 @@ def process_single_fits(
         
         # Process each detected object
         for i, obj in enumerate(celestial_objects):
-            cropped_data = sh._extract_object(obj, bkgless_data, padding=1.5, min_size=min_size, max_size=max_size, verbosity=0,
+            cropped_data = sh._extract_object(obj, bkgless_data, padding=3.5, min_size=min_size, max_size=max_size, verbosity=0,
                                               nan_mask=nan_mask, max_nan_fraction=0.02)
             
             if cropped_data is None:
@@ -704,6 +748,12 @@ def process_single_fits(
             if not sh.thumbnail_has_structure(cropped_data):
                 if verbosity >= 2:
                     print(f"  Skipping noise-dominated thumbnail at ({int(obj['x'])},{int(obj['y'])})")
+                continue
+            
+            # Reject star-like or flat radial profiles (sharp central peak, no extended emission)
+            if not sh.thumbnail_has_galaxy_profile(cropped_data):
+                if verbosity >= 2:
+                    print(f"  Skipping star/noise-like radial profile at ({int(obj['x'])},{int(obj['y'])})")
                 continue
             
             height, width = cropped_data.shape
@@ -743,7 +793,7 @@ def process_single_fits(
                     if verbosity >= 2:
                         print(f"  Warning: Galaxy at {obj_ra:.6f}, {obj_dec:.6f} from {filename} not found in database (skipping)")
                     continue
-                group_id, version, canonical_ra, canonical_dec = result
+                group_id, instance_id, version, canonical_ra, canonical_dec = result
             else:
                 # Extract quality metadata from SEP object
                 obj_flux = float(obj['flux']) if 'flux' in obj.dtype.names else None
@@ -758,7 +808,7 @@ def process_single_fits(
                     except Exception:
                         pass
                 
-                group_id, version, canonical_ra, canonical_dec = db.add_galaxy(
+                group_id, instance_id, version, canonical_ra, canonical_dec = db.add_galaxy(
                     obj_ra, obj_dec, height, width, waveband, filename,
                     snr=obj_snr, flux=obj_flux,
                     elongation=obj_elongation, npix=obj_npix
@@ -786,11 +836,17 @@ def process_single_fits(
                 # Update metadata
                 updated_meta_data = sh._update_meta_data(obj, cropped_data, image_meta_data, source_filename=filename)
                 
-                # Generate filename using canonical group coordinates (all galaxies in same group use same name)
-                canonical_ra_key = round_coordinate(canonical_ra, decimals=6)
-                canonical_dec_key = round_coordinate(canonical_dec, decimals=6)
-                output_filename = f"{canonical_ra_key:.6f}_{canonical_dec_key:.6f}_{waveband}_v{version}.fits"
-                output_path = os.path.join(output_dir, output_filename)
+                # Generate a deterministic sharded output path so the output root
+                # never fills with millions of FITS files.
+                output_filename, output_path = build_thumbnail_output_path(
+                    output_dir,
+                    canonical_ra,
+                    canonical_dec,
+                    waveband,
+                    version,
+                    instance_id,
+                    thumbnails_per_dir,
+                )
                 
                 # Save to FITS
                 sh.save_to_fits(output_path, cropped_data, updated_meta_data)
@@ -882,8 +938,9 @@ def worker_process(
     viz_output_dir: Optional[str] = None,
     max_memory_gb: float = 80.0,
     max_retries: int = 3,
-    detection_threshold: float = 3.0,
-    apply_galaxy_filter: bool = True
+    detection_threshold: float = 5.0,
+    apply_galaxy_filter: bool = True,
+    thumbnails_per_dir: int = 10000,
 ) -> int:
     '''Main worker process loop with robust error handling.
     
@@ -971,7 +1028,8 @@ def worker_process(
                     visualize_crops=visualize_crops,
                     viz_output_dir=viz_output_dir,
                     detection_threshold=detection_threshold,
-                    apply_galaxy_filter=apply_galaxy_filter
+                    apply_galaxy_filter=apply_galaxy_filter,
+                    thumbnails_per_dir=thumbnails_per_dir,
                 )
                 elapsed = time.time() - start_time
                 
@@ -1074,8 +1132,9 @@ def supervisor_process(
     max_memory_gb: float = 80.0,
     respawn_delay: float = 5.0,
     max_respawns_per_worker: int = 10,
-    detection_threshold: float = 3.0,
-    apply_galaxy_filter: bool = True
+    detection_threshold: float = 5.0,
+    apply_galaxy_filter: bool = True,
+    thumbnails_per_dir: int = 10000,
 ):
     """Supervisor that maintains the specified number of workers.
     
@@ -1100,6 +1159,7 @@ def supervisor_process(
     print(f"[Supervisor] Memory budget: {max_memory_gb}GB")
     print(f"[Supervisor] Detection threshold: {detection_threshold}σ")
     print(f"[Supervisor] Galaxy filter: {'enabled' if apply_galaxy_filter else 'disabled'}")
+    print(f"[Supervisor] Thumbnails per output directory: {thumbnails_per_dir}")
     
     # Initialize work queue to check file count
     all_files = sorted(glob.glob(os.path.join(input_dir, '*.fits')))
@@ -1133,6 +1193,7 @@ def supervisor_process(
         'max_memory_gb': max_memory_gb,
         'detection_threshold': detection_threshold,
         'apply_galaxy_filter': apply_galaxy_filter,
+        'thumbnails_per_dir': thumbnails_per_dir,
     }
     
     def start_worker(worker_id: int):
@@ -1369,12 +1430,18 @@ Examples:
                         help='Global memory budget in GB (default: 80)')
     parser.add_argument('--max-respawns', type=int, default=10,
                         help='Maximum times to respawn a crashed worker (default: 10)')
-    parser.add_argument('--detection-threshold', type=float, default=3.0,
-                        help='SEP detection threshold in sigma (default: 3.0). Lower = more detections, higher = fewer but cleaner.')
+    parser.add_argument('--detection-threshold', type=float, default=5.0,
+                        help='SEP detection threshold in sigma (default: 5.0). Lower = more detections, higher = fewer but cleaner.')
     parser.add_argument('--no-galaxy-filter', default=False, action='store_true',
                         help='Disable morphological galaxy filtering (for debugging/comparison)')
+    parser.add_argument('--thumbnails-per-dir', type=int, default=10000,
+                        help='Maximum thumbnails per numbered output subdirectory (default: 10000)')
     
     args = parser.parse_args()
+
+    if args.thumbnails_per_dir < 1:
+        print("Error: --thumbnails-per-dir must be at least 1")
+        sys.exit(1)
     
     # Create necessary directories
     if args.mode != 'crop-only' and args.output != '/dev/null':
@@ -1409,7 +1476,8 @@ Examples:
             max_memory_gb=args.max_memory_gb,
             max_respawns_per_worker=args.max_respawns,
             detection_threshold=args.detection_threshold,
-            apply_galaxy_filter=not args.no_galaxy_filter
+            apply_galaxy_filter=not args.no_galaxy_filter,
+            thumbnails_per_dir=args.thumbnails_per_dir,
         )
     else:
         # old single worker mode
@@ -1431,7 +1499,8 @@ Examples:
             viz_output_dir=viz_output_dir,
             max_memory_gb=args.max_memory_gb,
             detection_threshold=args.detection_threshold,
-            apply_galaxy_filter=not args.no_galaxy_filter
+            apply_galaxy_filter=not args.no_galaxy_filter,
+            thumbnails_per_dir=args.thumbnails_per_dir,
         )
         sys.exit(exit_code)
 

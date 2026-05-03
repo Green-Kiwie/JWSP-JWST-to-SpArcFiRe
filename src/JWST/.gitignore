@@ -1,3 +1,7 @@
 START.md
 inputs/
 scripts/__pycache__/
+scripts/archive/
+data/
+archive/
+.venv
