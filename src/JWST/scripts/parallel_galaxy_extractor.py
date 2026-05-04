@@ -28,7 +28,6 @@ Usage examples:
 
 import os
 import sys
-import glob
 import time
 import math
 import hashlib
@@ -48,6 +47,49 @@ from coordinate_database import CoordinateDatabase
 from memory_manager import MemoryManager
 
 _shutdown_requested = False
+
+
+def discover_fits_files(input_dir: str) -> List[str]:
+    '''Return FITS files from the input directory and all nested subdirectories.'''
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        return []
+
+    return sorted(
+        str(path)
+        for path in input_path.rglob('*')
+        if path.is_file() and path.suffix.lower() == '.fits'
+    )
+
+
+def sync_work_items_file(work_file: Path, all_files: List[str]):
+    '''Ensure the persistent work list includes all discovered files.
+
+    Existing entries are preserved so resume state remains stable across runs.
+    Newly discovered files are appended in sorted order.
+    '''
+    existing_files = []
+    existing_seen = set()
+
+    if work_file.exists():
+        with open(work_file, 'r') as f:
+            for line in f:
+                filepath = line.strip()
+                if filepath and filepath not in existing_seen:
+                    existing_files.append(filepath)
+                    existing_seen.add(filepath)
+
+    combined_files = list(existing_files)
+    for filepath in sorted(all_files):
+        normalized_path = str(Path(filepath))
+        if normalized_path not in existing_seen:
+            combined_files.append(normalized_path)
+            existing_seen.add(normalized_path)
+
+    if not work_file.exists() or combined_files != existing_files:
+        with open(work_file, 'w') as f:
+            for filepath in combined_files:
+                f.write(f"{filepath}\n")
 
 def signal_handler(signum, frame):
     """Handle shutdown signals gracefully."""
@@ -89,10 +131,7 @@ class WorkQueue:
         
         # Create work items
         self.work_file = self.queue_dir / 'work_items.txt'
-        if not self.work_file.exists():
-            with open(self.work_file, 'w') as f:
-                for filepath in sorted(all_files):
-                    f.write(f"{filepath}\n")
+        sync_work_items_file(self.work_file, all_files)
         
         self.claimed_dir = self.queue_dir / 'claimed'
         self.completed_dir = self.queue_dir / 'completed'
@@ -975,7 +1014,7 @@ def worker_process(
     
     # Get work queue with memory management
     try:
-        all_files = sorted(glob.glob(os.path.join(input_dir, '*.fits')))
+        all_files = discover_fits_files(input_dir)
         if not all_files:
             print(f"[Worker {worker_id}] No FITS files found in {input_dir}")
             return 2
@@ -1166,7 +1205,7 @@ def supervisor_process(
     print(f"[Supervisor] Thumbnails per output directory: {thumbnails_per_dir}")
     
     # Initialize work queue to check file count
-    all_files = sorted(glob.glob(os.path.join(input_dir, '*.fits')))
+    all_files = discover_fits_files(input_dir)
     if not all_files:
         print(f"[Supervisor] ERROR: No FITS files found in {input_dir}")
         return
@@ -1411,7 +1450,7 @@ Examples:
                               help='Legacy: Unique worker ID (0, 1, 2, ...) for single worker mode')
     
     parser.add_argument('--input', type=str, required=True,
-                        help='Input directory containing FITS files')
+                        help='Input directory containing FITS files (searched recursively)')
     parser.add_argument('--output', type=str, required=True,
                         help='Output directory for cropped galaxies')
     parser.add_argument('--db-path', type=str, required=True,
