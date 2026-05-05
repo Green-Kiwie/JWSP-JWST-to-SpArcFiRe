@@ -173,13 +173,49 @@ class WorkQueue:
                         with open(claim_file, 'r') as f:
                             lines = f.readlines()
                             if len(lines) >= 2:
+                                worker_label = lines[0].strip()
                                 filepath = lines[1].strip()
                                 print(f"[Queue] Reclaiming stale file: {os.path.basename(filepath)}")
+                                if worker_label.startswith('worker_'):
+                                    try:
+                                        worker_id = int(worker_label.split('_', 1)[1])
+                                        self.mem_manager.unregister_worker_memory(worker_id)
+                                    except ValueError:
+                                        pass
                         claim_file.unlink()
                     except (IOError, OSError):
                         pass
         except (IOError, OSError):
             pass
+
+    def _get_active_claims(self) -> dict[str, str]:
+        '''Return the current claimed worker-to-file mapping.'''
+        active_claims = {}
+
+        try:
+            for claim_file in self.claimed_dir.iterdir():
+                try:
+                    with open(claim_file, 'r') as f:
+                        lines = f.readlines()
+                    if len(lines) < 2:
+                        continue
+
+                    worker_label = lines[0].strip()
+                    filepath = lines[1].strip()
+                    if worker_label and filepath:
+                        active_claims[worker_label] = filepath
+                except (IOError, OSError):
+                    continue
+        except (IOError, OSError):
+            return {}
+
+        return active_claims
+
+    def _reconcile_memory_reservations(self):
+        '''Remove memory reservations that no longer have a live claim file.'''
+        stale_reservations = self.mem_manager.reconcile_worker_allocations(self._get_active_claims())
+        if stale_reservations > 0:
+            print(f"[Queue] Cleared {stale_reservations} stale memory reservation(s)")
     
     def get_queue_status(self) -> dict:
         '''Get current queue status for monitoring.'''
@@ -249,6 +285,7 @@ class WorkQueue:
         '''
         # Periodically reclaim stale files from dead workers
         self._reclaim_stale_files()
+        self._reconcile_memory_reservations()
         
         # Refresh claimed/completed/skipped/failed lists
         try:
